@@ -133,6 +133,10 @@
   </header>
 
   <section>
+    <div class="payday" id="payday" style="display:none">
+      <span>今日は給料日です💰 お金の移動を忘れずに</span>
+      <button id="paydayClose">✕</button>
+    </div>
     <div class="hero">
       <div class="row"><span>今月の予算</span><span class="tabular" id="budget">¥0</span></div>
       <div class="mid">
@@ -192,8 +196,16 @@
 const API = "https://dry-shadow-b5c5.fituni19taniguchi.workers.dev";
 
 // ---- 状態 ----
+// 今日の日付が属する「会計月」(26日始まり)を返す
+function currentFiscalMonth(){
+  const now = new Date();
+  let y = now.getFullYear(), m = now.getMonth()+1, d = now.getDate();
+  if(d >= 26){ m += 1; if(m > 12){ m = 1; y += 1; } }
+  return y + "-" + String(m).padStart(2,"0");
+}
+
 let state = {
-  month: new Date().toISOString().slice(0,7),  // 今月から開始
+  month: currentFiscalMonth(),  // 26日締めの当月から開始
   tab: "category",
   options: { categories: [], accounts: [] },
   summary: null,
@@ -369,9 +381,15 @@ function openSheet(){
   $("overlay").style.display = "flex";
 }
 function closeSheet(){ $("overlay").style.display = "none"; }
+function fiscalMonthOf(dateStr){
+  const [y,m,d] = dateStr.slice(0,10).split("-").map(Number);
+  let fy=y, fm=m;
+  if(d>=26){ fm+=1; if(fm>12){ fm=1; fy+=1; } }
+  return fy + "-" + String(fm).padStart(2,"0");
+}
 function updateMonthHint(){
   const d = $("f-date").value;
-  $("monthHint").textContent = d ? "※ 日付（"+d.slice(0,7)+"）から自動で月が判定されます" : "";
+  $("monthHint").textContent = d ? "※ この取引は会計月「"+fiscalMonthOf(d)+"」に入ります（26日締め）" : "";
 }
 
 // ---- イベント ----
@@ -395,8 +413,16 @@ document.querySelectorAll("#typeSeg button").forEach(b=>{
   };
 });
 
+// ---- 給料日バナー（26日に表示）----
+function checkPayday(){
+  if(new Date().getDate() === 26){
+    $("payday").style.display = "flex";
+  }
+}
+$("paydayClose").onclick = ()=>{ $("payday").style.display = "none"; };
+
 // ---- 起動 ----
-(async()=>{ await loadOptions(); await loadSummary(); })();
+(async()=>{ checkPayday(); await loadOptions(); await loadSummary(); })();
 </script>
 </body>
 </html>
