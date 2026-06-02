@@ -174,7 +174,7 @@
 <!-- 入力シート -->
 <div class="overlay" id="overlay" style="display:none">
   <div class="sheet" onclick="event.stopPropagation()">
-    <h2>取引を追加 <button class="x" id="sheetClose">✕</button></h2>
+    <h2 id="sheetTitle">取引を追加 <button class="x" id="sheetClose">✕</button></h2>
     <div class="seg" id="typeSeg">
       <button data-type="expense" class="on">支出</button>
       <button data-type="income">収入</button>
@@ -311,15 +311,20 @@ function renderTab(){
 
   else if(state.tab === "list"){
     if(!s.transactions.length){ c.innerHTML = '<div class="empty">この月の取引はありません</div>'; return; }
-    c.innerHTML = s.transactions.map(t=>{
+    c.innerHTML = s.transactions.map((t,i)=>{
       const inc = (t.kind||"").includes("収入");
-      return '<div class="txrow"><div style="flex:1;min-width:0"><div class="m">'+(t.category||"（無題）")+'</div>'
-        + '<div class="s">'+ (t.date? t.date.slice(5,10):"") +' · '+(t.kind||"").replace(/\s/g,"")+'</div></div>'
-        + '<div class="a" style="color:'+(inc?"var(--green)":"var(--ink)")+'">'+(inc?"+":"−")+yen(t.amount)+'</div>'
+      return '<div class="txrow"><div class="txmain" data-i="'+i+'" style="flex:1;min-width:0">'
+        + '<div class="m">'+(t.memo || t.category || "（無題）")+'</div>'
+        + '<div class="s">'+ (t.date? t.date.slice(5,10):"") +' · '+(t.category||"")+' · '+(t.kind||"").replace(/\s/g,"")+'</div></div>'
+        + '<div class="a" data-i="'+i+'" style="color:'+(inc?"var(--green)":"var(--ink)")+'">'+(inc?"+":"−")+yen(t.amount)+'</div>'
         + '<button class="del" data-id="'+t.id+'" data-label="'+(t.category||"")+' '+yen(t.amount)+'">🗑</button></div>';
     }).join("");
+    // 行（金額・内容部分）タップで編集シートを開く
+    c.querySelectorAll(".txmain, .a").forEach(el=>{
+      el.onclick = ()=> openEditSheet(s.transactions[el.dataset.i]);
+    });
     c.querySelectorAll(".del").forEach(b=>{
-      b.onclick = ()=> deleteTx(b.dataset.id, b.dataset.label);
+      b.onclick = (e)=>{ e.stopPropagation(); deleteTx(b.dataset.id, b.dataset.label); };
     });
   }
 
@@ -352,7 +357,9 @@ function refreshCategorySelect(type){
   catSel.innerHTML = cats.map(c=>'<option>'+c.name+'</option>').join("");
 }
 
-// ---- 追加 ----
+// ---- 追加 / 編集（共通） ----
+let editingId = null;  // null=追加モード, 値あり=編集モード
+
 async function submitTx(){
   const amount = parseInt($("f-amount").value,10);
   const date = $("f-date").value;
@@ -363,31 +370,67 @@ async function submitTx(){
   if(!date){ toast("日付を選んでください", true); return; }
   if(!category){ toast("カテゴリを選んでください", true); return; }
 
+  const isEdit = !!editingId;
   const btn = $("submitBtn");
-  btn.disabled = true; btn.textContent = "追加中…";
+  btn.disabled = true; btn.textContent = isEdit ? "更新中…" : "追加中…";
   try{
-    const r = await fetch(API + "/add", {
+    const body = { date, amount, category, account, memo };
+    if(isEdit) body.id = editingId;
+    const r = await fetch(API + (isEdit ? "/update" : "/add"), {
       method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({ date, amount, category, account, memo })
+      body: JSON.stringify(body)
     });
     const d = await r.json();
-    if(!d.ok) throw new Error(d.error || "add error");
-    toast("追加しました（" + d.month + "）");
+    if(!d.ok) throw new Error(d.error || "error");
+    toast(isEdit ? "更新しました（" + d.month + "）" : "追加しました（" + d.month + "）");
     closeSheet();
-    state.month = d.month;      // 追加した月へ移動
+    state.month = d.month;      // 対象の月へ移動
     await loadSummary();
-  }catch(e){ toast("追加に失敗: " + e.message, true); }
-  finally{ btn.disabled = false; btn.textContent = "追加する"; }
+  }catch(e){ toast((isEdit?"更新":"追加")+"に失敗: " + e.message, true); }
+  finally{ btn.disabled = false; btn.textContent = isEdit ? "更新する" : "追加する"; }
 }
 
 // ---- シート開閉 ----
+function setType(type){
+  document.querySelectorAll("#typeSeg button").forEach(x=>x.classList.toggle("on", x.dataset.type===type));
+  refreshCategorySelect(type);
+}
+
+// 新規追加で開く
 function openSheet(){
+  editingId = null;
+  $("sheetTitle").innerHTML = '取引を追加 <button class="x" id="sheetClose">✕</button>';
+  $("submitBtn").textContent = "追加する";
+  setType("expense");
   $("f-date").value = new Date().toISOString().slice(0,10);
   $("f-amount").value = ""; $("f-memo").value = "";
   updateMonthHint();
+  bindSheetClose();
   $("overlay").style.display = "flex";
 }
-function closeSheet(){ $("overlay").style.display = "none"; }
+
+// 既存取引を編集で開く（元の値をセット）
+function openEditSheet(t){
+  editingId = t.id;
+  $("sheetTitle").innerHTML = '取引を編集 <button class="x" id="sheetClose">✕</button>';
+  $("submitBtn").textContent = "更新する";
+  const type = (t.kind||"").includes("収入") ? "income" : "expense";
+  setType(type);
+  $("f-date").value = t.date ? t.date.slice(0,10) : new Date().toISOString().slice(0,10);
+  $("f-amount").value = t.amount || "";
+  $("f-memo").value = t.memo || "";
+  // カテゴリ・口座は候補を作った後に選択
+  if(t.category) $("f-category").value = t.category;
+  if(t.account) $("f-account").value = t.account;
+  updateMonthHint();
+  bindSheetClose();
+  $("overlay").style.display = "flex";
+}
+
+function bindSheetClose(){
+  $("sheetClose").onclick = closeSheet;
+}
+function closeSheet(){ editingId = null; $("overlay").style.display = "none"; }
 function fiscalMonthOf(dateStr){
   const [y,m,d] = dateStr.slice(0,10).split("-").map(Number);
   let fy=y, fm=m;
@@ -414,10 +457,7 @@ $("overlay").onclick = closeSheet;
 $("submitBtn").onclick = submitTx;
 $("f-date").onchange = updateMonthHint;
 document.querySelectorAll("#typeSeg button").forEach(b=>{
-  b.onclick = ()=>{
-    document.querySelectorAll("#typeSeg button").forEach(x=>x.classList.remove("on"));
-    b.classList.add("on"); refreshCategorySelect(b.dataset.type);
-  };
+  b.onclick = ()=> setType(b.dataset.type);
 });
 
 // ---- 取引を削除 ----
