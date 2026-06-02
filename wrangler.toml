@@ -1,0 +1,14 @@
+name = "kakeibo"
+main = "worker.js"
+compatibility_date = "2025-09-01"
+
+# --- DBのID（秘密ではないのでここに書いてOK）---
+[vars]
+DB_TX       = "2b1540ea83bc4c3fac289eaaa06cabad"  # 取引DB(お金アクティビティ)
+DB_MONTH    = "167006ad389e431d80711464017dc48c"  # 月DB
+DB_CATEGORY = "fa068b3157224220919c03ad4ed0f08d"  # カテゴリDB
+DB_ACCOUNT  = "008ffaf6a9bf4a228b1ce8a492756fe9"  # 口座DB
+DEFAULT_BUDGET = "100000"                          # 新しい月の自動作成時の予算
+
+# --- NOTION_TOKEN は secret として別途登録します（ここには書かない）---
+#   npx wrangler secret put NOTION_TOKEN
