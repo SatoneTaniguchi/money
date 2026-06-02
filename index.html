@@ -226,6 +226,48 @@ function toast(msg, isErr){
   setTimeout(()=>{ t.className = "toast" + (isErr ? " err":""); }, 2600);
 }
 
+// ---- ローカルで集計を再計算（Notionの確定を待たず即反映するため）----
+function classifyLocal(kind){
+  const k = (kind||"").replace(/\s/g,"");
+  if(k.includes("固定費")) return "fixed";
+  if(k.includes("収入")) return "income";
+  if(k.includes("支出")) return "variable";
+  return "ignore";
+}
+function recomputeSummary(){
+  const s = state.summary;
+  if(!s) return;
+  let income=0, variableExpense=0, fixedExpense=0;
+  const byCategory={}, byAccount={};
+  // カテゴリ名→kind の対応（options から）
+  const kindOf = {};
+  state.options.categories.forEach(c=> kindOf[c.name] = c.kind);
+  for(const t of s.transactions){
+    const kind = t.kind || kindOf[t.category] || "";
+    const bucket = classifyLocal(kind);
+    if(bucket==="income") income += t.amount;
+    else if(bucket==="fixed") fixedExpense += t.amount;
+    else if(bucket==="variable") variableExpense += t.amount;
+    if(t.category && (bucket==="variable"||bucket==="fixed")){
+      if(!byCategory[t.category]) byCategory[t.category] = { amount:0, kind };
+      byCategory[t.category].amount += t.amount;
+    }
+    if(t.account){
+      byAccount[t.account] = byAccount[t.account] || { out:0, in:0 };
+      if(bucket==="income") byAccount[t.account].in += t.amount;
+      else byAccount[t.account].out += t.amount;
+    }
+  }
+  s.income = income;
+  s.variableExpense = variableExpense;
+  s.fixedExpense = fixedExpense;
+  s.balance = income - variableExpense - fixedExpense;
+  s.budgetUsedPct = s.budget>0 ? (variableExpense/s.budget)*100 : 0;
+  s.budgetRemaining = s.budget - variableExpense;
+  renderHero();
+  renderTab();
+}
+
 function shiftMonth(dir){
   const [y,m] = state.month.split("-").map(Number);
   const d = new Date(y, m-1+dir, 1);
@@ -371,23 +413,54 @@ async function submitTx(){
   if(!category){ toast("カテゴリを選んでください", true); return; }
 
   const isEdit = !!editingId;
-  const btn = $("submitBtn");
-  btn.disabled = true; btn.textContent = isEdit ? "更新中…" : "追加中…";
+  const kindOf = {}; state.options.categories.forEach(c=> kindOf[c.name]=c.kind);
+  const kind = kindOf[category] || "";
+  const txMonth = fiscalMonthOf(date);
+  const editId = editingId;
+
+  // --- 画面を即反映（楽観的更新）---
+  closeSheet();
+  if(txMonth === state.month){
+    const s = state.summary;
+    if(s){
+      if(isEdit){
+        const idx = s.transactions.findIndex(t=>t.id===editId);
+        if(idx>=0) s.transactions[idx] = { id:editId, date, amount, category, kind, account, memo };
+      }else{
+        // 仮IDで先に表示（保存後に本IDへ差し替え）
+        s.transactions.push({ id:"temp-"+Date.now(), date, amount, category, kind, account, memo, _pending:true });
+      }
+      s.transactions.sort((a,b)=> (b.date||"").localeCompare(a.date||""));
+      recomputeSummary();
+    }
+  }
+  toast(isEdit ? "更新中…" : "追加中…");
+
+  // --- 裏でNotionに保存 ---
   try{
     const body = { date, amount, category, account, memo };
-    if(isEdit) body.id = editingId;
+    if(isEdit) body.id = editId;
     const r = await fetch(API + (isEdit ? "/update" : "/add"), {
       method:"POST", headers:{"Content-Type":"application/json"},
       body: JSON.stringify(body)
     });
     const d = await r.json();
     if(!d.ok) throw new Error(d.error || "error");
-    toast(isEdit ? "更新しました（" + d.month + "）" : "追加しました（" + d.month + "）");
-    closeSheet();
-    state.month = d.month;      // 対象の月へ移動
-    await loadSummary();
-  }catch(e){ toast((isEdit?"更新":"追加")+"に失敗: " + e.message, true); }
-  finally{ btn.disabled = false; btn.textContent = isEdit ? "更新する" : "追加する"; }
+    toast(isEdit ? "更新しました" : "追加しました");
+    // 追加なら、表示中の月が対象月と違えばその月へ移動して取り直し
+    if(!isEdit && d.month !== state.month){
+      state.month = d.month; await loadSummary();
+    }else{
+      // 仮IDを本IDに静かに差し替え（次回操作のため）
+      if(!isEdit && state.summary){
+        const tmp = state.summary.transactions.find(t=>t._pending);
+        if(tmp){ tmp.id = d.id; delete tmp._pending; }
+      }
+    }
+  }catch(e){
+    toast((isEdit?"更新":"追加")+"に失敗しました。再読み込みします", true);
+    await loadSummary();   // 失敗したらサーバーの正しい状態に戻す
+  }
 }
 
 // ---- シート開閉 ----
@@ -460,9 +533,21 @@ document.querySelectorAll("#typeSeg button").forEach(b=>{
   b.onclick = ()=> setType(b.dataset.type);
 });
 
-// ---- 取引を削除 ----
+// ---- 取引を削除（楽観的更新）----
 async function deleteTx(id, label){
   if(!confirm("この取引を削除しますか？\n\n" + (label||"") + "\n\n※Notionのゴミ箱に移動します")) return;
+
+  // 画面から即削除
+  const s = state.summary;
+  let backup = null;
+  if(s){
+    backup = s.transactions.slice();
+    s.transactions = s.transactions.filter(t=>t.id!==id);
+    recomputeSummary();
+  }
+  toast("削除中…");
+
+  // 裏でNotionに反映
   try{
     const r = await fetch(API + "/delete", {
       method:"POST", headers:{"Content-Type":"application/json"},
@@ -471,8 +556,10 @@ async function deleteTx(id, label){
     const d = await r.json();
     if(!d.ok) throw new Error(d.error || "delete error");
     toast("削除しました");
-    await loadSummary();
-  }catch(e){ toast("削除に失敗: " + e.message, true); }
+  }catch(e){
+    toast("削除に失敗しました。元に戻します", true);
+    if(s && backup){ s.transactions = backup; recomputeSummary(); }
+  }
 }
 
 // ---- 給料日バナー（26日に表示）----
