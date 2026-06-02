@@ -66,6 +66,9 @@
   .txrow .m{font-size:14px;font-weight:700}
   .txrow .s{font-size:11px;color:var(--sub);margin-top:2px}
   .txrow .a{font-family:'Shippori Mincho B1',serif;font-weight:700}
+  .del{background:none;border:none;font-size:16px;cursor:pointer;padding:4px 2px 4px 10px;
+    opacity:.4;flex-shrink:0;transition:opacity .2s}
+  .del:active{opacity:1}
 
   .donut-wrap{background:var(--card);border-radius:16px;padding:16px;position:relative}
   .donut-center{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none}
@@ -310,10 +313,14 @@ function renderTab(){
     if(!s.transactions.length){ c.innerHTML = '<div class="empty">この月の取引はありません</div>'; return; }
     c.innerHTML = s.transactions.map(t=>{
       const inc = (t.kind||"").includes("収入");
-      return '<div class="txrow"><div><div class="m">'+(t.category||"（無題）")+'</div>'
+      return '<div class="txrow"><div style="flex:1;min-width:0"><div class="m">'+(t.category||"（無題）")+'</div>'
         + '<div class="s">'+ (t.date? t.date.slice(5,10):"") +' · '+(t.kind||"").replace(/\s/g,"")+'</div></div>'
-        + '<div class="a" style="color:'+(inc?"var(--green)":"var(--ink)")+'">'+(inc?"+":"−")+yen(t.amount)+'</div></div>';
+        + '<div class="a" style="color:'+(inc?"var(--green)":"var(--ink)")+'">'+(inc?"+":"−")+yen(t.amount)+'</div>'
+        + '<button class="del" data-id="'+t.id+'" data-label="'+(t.category||"")+' '+yen(t.amount)+'">🗑</button></div>';
     }).join("");
+    c.querySelectorAll(".del").forEach(b=>{
+      b.onclick = ()=> deleteTx(b.dataset.id, b.dataset.label);
+    });
   }
 
   else if(state.tab === "account"){
@@ -412,6 +419,21 @@ document.querySelectorAll("#typeSeg button").forEach(b=>{
     b.classList.add("on"); refreshCategorySelect(b.dataset.type);
   };
 });
+
+// ---- 取引を削除 ----
+async function deleteTx(id, label){
+  if(!confirm("この取引を削除しますか？\n\n" + (label||"") + "\n\n※Notionのゴミ箱に移動します")) return;
+  try{
+    const r = await fetch(API + "/delete", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ id })
+    });
+    const d = await r.json();
+    if(!d.ok) throw new Error(d.error || "delete error");
+    toast("削除しました");
+    await loadSummary();
+  }catch(e){ toast("削除に失敗: " + e.message, true); }
+}
 
 // ---- 給料日バナー（26日に表示）----
 function checkPayday(){
