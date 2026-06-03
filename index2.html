@@ -1107,7 +1107,15 @@ async function startScan(files){
     for(const f of files) encoded.push(await fileToBase64(f));
     const r = await fetch(API + "/parse", {
       method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({ files: encoded, today: new Date().toISOString().slice(0,10) })
+      body: JSON.stringify({
+        files: encoded,
+        today: new Date().toISOString().slice(0,10),
+        hint: [
+          "【仕訳・分類ルール】",
+          "1. 店名や品名から用途が推測できる場合は、漏れなくその情報を考慮して分類してください。",
+          "2. 「〇〇への送金」といった送金系のデータは、一律「交際費（食事）」として処理してください。"
+        ].join("\n")
+      })
     });
     const d = await r.json();
     if(!d.ok) throw new Error(d.error || "parse error");
@@ -1125,7 +1133,12 @@ async function startScan(files){
         account: "",
       };
     });
-    if(!rows.length){ $("reviewList").innerHTML = '<div class="empty">取引を読み取れませんでした</div>'; return; }
+    if(!rows.length){
+      // 取引0件でも「読み込みを試みた」記録は残す
+      autoAddIlogFromScan([], files);
+      $("reviewList").innerHTML = '<div class="empty">取引を読み取れませんでした</div>';
+      return;
+    }
 
     // 重複判定（既存取引 + バッチ内の重複）
     const exist = await existingKeySet(rows);
@@ -1140,7 +1153,7 @@ async function startScan(files){
     scanRows = rows;
 
     // AI解析結果から取込記録を自動生成
-    autoAddIlogFromScan(rows);
+    autoAddIlogFromScan(rows, files);
 
     renderReview();
   }catch(e){
@@ -1271,17 +1284,20 @@ function saveIlogEntries(arr){
 }
 
 // AI解析完了時に仮エントリを自動追加（口座はsubmit時確定）
-function autoAddIlogFromScan(rows){
-  if(!rows || !rows.length) return;
-  const dates = rows.map(r=>r.date).filter(Boolean).sort();
+function autoAddIlogFromScan(rows, files){
+  const dates = (rows||[]).map(r=>r.date).filter(Boolean).sort();
+  const today = new Date().toISOString().slice(0,10);
+  // ファイル数をメモに
+  const fileCount = (files && files.length) ? files.length + 'ファイル読込' : '';
+  const noTx = (!rows || !rows.length);
   const entry = {
     id: 'scan_' + Date.now(),
     source: '',
-    from: dates[0] || '',
-    to: dates[dates.length-1] || '',
-    memo: '',
+    from: dates[0] || today,
+    to: dates[dates.length-1] || today,
+    memo: [fileCount, noTx ? '取引データなし' : ''].filter(Boolean).join(' / '),
     savedAt: new Date().toISOString(),
-    _pending: true
+    _pending: !noTx   // 取引なしなら即確定（口座選択不要）
   };
   const entries = getIlogEntries();
   entries.push(entry);
