@@ -158,6 +158,63 @@
     pointer-events:none;color:var(--sub);font-size:12px}
   .cat-dot{position:absolute;left:14px;top:50%;transform:translateY(-50%);
     width:12px;height:12px;border-radius:50%;pointer-events:none;transition:background .15s}
+
+  /* ===== カレンダー ===== */
+  .cal-nav{display:flex;align-items:center;justify-content:space-between;padding:0 4px 12px}
+  .cal-nav button{background:none;border:none;font-size:18px;color:var(--ink);cursor:pointer;padding:4px 8px}
+  .cal-nav .cal-title{font-family:'Shippori Mincho B1',serif;font-weight:700;font-size:15px}
+  .cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px}
+  .cal-dow{text-align:center;font-size:10px;color:var(--sub);padding:4px 0}
+  .cal-dow:first-child{color:#c2563f}
+  .cal-dow:last-child{color:#4a6fa5}
+  .cal-cell{min-height:56px;border-radius:10px;background:var(--card);padding:4px 3px 2px;cursor:pointer;position:relative;transition:background .15s}
+  .cal-cell:active{background:#e8e4db}
+  .cal-cell.today{box-shadow:0 0 0 2px var(--navy) inset}
+  .cal-cell.other-month{opacity:.35}
+  .cal-cell.selected{background:#e8e2d6;box-shadow:0 0 0 2px var(--navy) inset}
+  .cal-cell .cday{font-size:11px;font-weight:700;text-align:center;line-height:1}
+  .cal-cell:nth-child(7n+1) .cday{color:#c2563f}
+  .cal-cell:nth-child(7n) .cday{color:#4a6fa5}
+  .cal-cell .cdots{display:flex;flex-wrap:wrap;gap:2px;margin-top:3px;justify-content:center}
+  .cdot-tx{width:6px;height:6px;border-radius:50%;background:var(--red)}
+  .cdot-bill{width:6px;height:6px;border-radius:50%;background:var(--blue)}
+  .cal-cell .ctotal{font-size:9px;color:var(--sub);text-align:center;margin-top:1px;font-variant-numeric:tabular-nums}
+  /* 日付詳細ポップオーバー */
+  .day-detail{background:var(--card);border-radius:16px;padding:14px;margin-top:8px}
+  .day-detail .dd-head{font-size:13px;font-weight:700;margin-bottom:10px;color:var(--navy)}
+  .day-detail .dd-row{display:flex;justify-content:space-between;align-items:center;font-size:13px;padding:6px 0;border-bottom:1px solid #f0ede6}
+  .day-detail .dd-row:last-child{border-bottom:none}
+  .day-detail .dd-cat{font-size:10px;color:var(--sub);margin-top:1px}
+  .day-detail .dd-amt{font-family:'Shippori Mincho B1',serif;font-weight:700}
+  .day-detail .dd-bill{color:var(--blue)}
+
+  /* ===== 支払管理 ===== */
+  .bills-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
+  .bills-header h3{margin:0;font-size:14px;font-weight:700}
+  .bills-add-btn{background:var(--navy);color:#fff;border:none;border-radius:99px;font-size:12px;font-family:inherit;padding:6px 14px;cursor:pointer}
+  .bill-section-label{font-size:10px;font-weight:700;letter-spacing:.1em;color:var(--sub);margin:12px 0 4px;text-transform:uppercase}
+  .bill-card{background:var(--card);border-radius:14px;padding:12px 14px;display:flex;align-items:center;gap:10px;margin-bottom:6px}
+  .bill-icon{font-size:22px;flex-shrink:0;width:32px;text-align:center}
+  .bill-info{flex:1;min-width:0}
+  .bill-name{font-size:14px;font-weight:700}
+  .bill-sub{font-size:11px;color:var(--sub);margin-top:2px}
+  .bill-right{text-align:right;flex-shrink:0}
+  .bill-amt{font-family:'Shippori Mincho B1',serif;font-weight:700;font-size:14px}
+  .bill-day{font-size:11px;color:var(--sub);margin-top:2px}
+  .bill-actions{display:flex;gap:6px;margin-top:6px}
+  .bill-del{background:none;border:none;font-size:14px;cursor:pointer;opacity:.4;padding:2px}
+  .bill-edit{background:none;border:none;font-size:12px;cursor:pointer;color:var(--navy);padding:2px;font-family:inherit}
+  .upcoming-banner{background:linear-gradient(135deg,var(--navy),var(--navy2));border-radius:16px;padding:14px 16px;color:#fff;margin-bottom:8px}
+  .upcoming-banner .ub-title{font-size:11px;opacity:.7;margin-bottom:6px}
+  .upcoming-banner .ub-list{display:flex;flex-direction:column;gap:4px}
+  .upcoming-banner .ub-row{display:flex;justify-content:space-between;font-size:13px}
+  .upcoming-banner .ub-row .ub-soon{font-size:10px;background:rgba(255,255,255,.2);border-radius:99px;padding:1px 7px;margin-left:6px;vertical-align:middle}
+  .bills-total{background:var(--card);border-radius:14px;padding:12px 14px;display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+  .bills-total .bt-label{font-size:12px;color:var(--sub)}
+  .bills-total .bt-val{font-family:'Shippori Mincho B1',serif;font-weight:700;font-size:16px}
+  .bill-enable{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--sub);margin:6px 2px 2px;cursor:pointer}
+  .bill-enable input{width:auto;accent-color:var(--navy)}
+  .bill-card.bill-off{opacity:.5}
 </style>
 </head>
 <body>
@@ -201,6 +258,8 @@
   <div class="tabs">
     <button data-tab="category" class="on">カテゴリ</button>
     <button data-tab="list">取引</button>
+    <button data-tab="calendar">📅</button>
+    <button data-tab="bills">💳</button>
     <button data-tab="account">口座</button>
     <button data-tab="balance">残高</button>
   </div>
@@ -214,6 +273,41 @@
 <button class="fab" id="fab">＋</button>
 <input type="file" id="scanInput" accept="image/*,application/pdf" multiple style="display:none" />
 <div id="toast" class="toast"></div>
+
+
+<!-- 支払管理 登録シート -->
+<div class="overlay" id="billOverlay" style="display:none">
+  <div class="sheet" onclick="event.stopPropagation()">
+    <h2 id="billSheetTitle">支払いを登録 <button class="x" id="billClose">✕</button></h2>
+    <div class="mb"><label class="fld">名前（例：Amazonプライム）</label><input id="b-name" placeholder="名前" /></div>
+    <div class="grid2">
+      <div><label class="fld">金額（任意）</label><input id="b-amount" type="number" inputmode="numeric" placeholder="0" /></div>
+      <div><label class="fld">毎月の支払日</label><input id="b-day" type="number" inputmode="numeric" min="1" max="31" placeholder="例: 27" /></div>
+    </div>
+    <div class="mb"><label class="fld">種別</label>
+      <select id="b-type">
+        <option value="サブスク">サブスク</option>
+        <option value="光熱費・通信">光熱費・通信</option>
+        <option value="保険">保険</option>
+        <option value="その他固定費">その他固定費</option>
+      </select>
+    </div>
+    <div class="mb"><label class="fld">引き落とし口座（任意）</label><select id="b-account"></select></div>
+    <div class="mb"><label class="fld">メモ（任意）</label><input id="b-memo" placeholder="備考" /></div>
+    <label class="bill-enable"><input type="checkbox" id="b-enabled" checked /> 有効（オフにすると集計・カレンダーから除外）</label>
+    <button class="submit" id="billSubmit">登録する</button>
+  </div>
+</div>
+
+<!-- クレカ支払日 設定シート（口座DBの「支払日」に保存） -->
+<div class="overlay" id="cardDayOverlay" style="display:none">
+  <div class="sheet" onclick="event.stopPropagation()">
+    <h2 id="cardDayTitle">支払日 <button class="x" id="cardDayClose">✕</button></h2>
+    <div class="mb"><label class="fld">毎月の支払日</label><input id="cd-day" type="number" inputmode="numeric" min="1" max="31" placeholder="例: 27" /></div>
+    <div class="hint">この支払日はNotionの口座DBの「支払日」に保存されます</div>
+    <button class="submit" id="cardDaySubmit">保存する</button>
+  </div>
+</div>
 
 <!-- 読み込み結果の確認・編集シート -->
 <div class="overlay" id="reviewOverlay" style="display:none">
@@ -457,6 +551,12 @@ function renderTab(){
 
   else if(state.tab === "balance"){
     renderBalances(c);
+  }
+  else if(state.tab === "calendar"){
+    renderCalendar(c);
+  }
+  else if(state.tab === "bills"){
+    renderBills(c);
   }
 }
 
@@ -790,7 +890,7 @@ $("next").onclick = ()=>shiftMonth(1);
 document.querySelectorAll(".tabs button").forEach(b=>{
   b.onclick = ()=>{
     document.querySelectorAll(".tabs button").forEach(x=>x.classList.remove("on"));
-    b.classList.add("on"); state.tab = b.dataset.tab; renderTab();
+    b.classList.add("on"); state.tab = b.dataset.tab; if(state.tab==="calendar") syncCalToMonth(); renderTab();
   };
 });
 $("fab").onclick = openSheet;
@@ -1059,7 +1159,386 @@ $("reviewOverlay").onclick = closeReview;
 $("reviewSubmit").onclick = submitScan;
 
 // ---- 起動 ----
-(async()=>{ checkPayday(); await loadOptions(); await loadSummary(); })();
+(async()=>{ checkPayday(); await loadOptions(); await loadBills(); await loadSummary(); })();
+
+// ============================================================
+//  支払管理（Notion: 固定費・サブスクDB）
+// ============================================================
+let bills = [];
+async function loadBills(){
+  try{
+    const r = await fetch(API + "/bills?t=" + Date.now());
+    const d = await r.json();
+    bills = d.ok ? (d.bills || []) : [];
+  }catch(e){ bills = []; }
+}
+
+// Notionの口座からクレカ（カード系列）を取得
+function getCardAccounts(){
+  return (state.options.accounts||[]).filter(a=>(a.type||"").includes("カード"));
+}
+// 口座DBの支払日を更新するシート（クレカ等）
+let cardDayName = null;
+function openCardDaySheet(name, currentDay){
+  cardDayName = name;
+  $("cardDayTitle").innerHTML = '💳 '+name+' の支払日 <button class="x" id="cardDayClose">✕</button>';
+  $("cd-day").value = currentDay || "";
+  $("cardDayClose").onclick = closeCardDaySheet;
+  $("cardDayOverlay").style.display = "flex";
+}
+function closeCardDaySheet(){ cardDayName = null; $("cardDayOverlay").style.display = "none"; }
+async function submitCardDay(){
+  if(!cardDayName) return;
+  const name = cardDayName;
+  const day = parseInt($("cd-day").value)||0;
+  closeCardDaySheet();
+  // 楽観的更新：optionsの口座dayを書き換えて即反映
+  const a = (state.options.accounts||[]).find(x=>x.name===name);
+  if(a) a.day = day;
+  if(state.tab==="bills"||state.tab==="calendar") renderTab();
+  toast("保存中…");
+  try{
+    const r = await fetch(API + "/account/day", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ name, day })
+    });
+    const d = await r.json();
+    if(!d.ok) throw new Error(d.error || "error");
+    toast("保存しました");
+  }catch(e){
+    toast("保存に失敗しました。再読み込みします", true);
+    await loadOptions();
+    if(state.tab==="bills"||state.tab==="calendar") renderTab();
+  }
+}
+
+// 種別ごとのアイコンと表示順（NotionのセレクトはこのままのラベルでOK）
+const BILL_ICON_BY_TYPE = { "サブスク":"📱", "クレジットカード":"💳", "光熱費・通信":"💡", "保険":"🏥", "その他固定費":"📋" };
+function billIcon(type){ return BILL_ICON_BY_TYPE[type] || "📋"; }
+const BILL_TYPE_ORDER = ["サブスク","光熱費・通信","保険","その他固定費"];
+
+let editingBillId = null;
+
+function openBillSheet(bill, preset){
+  editingBillId = bill ? bill.id : null;
+  $("billSheetTitle").innerHTML = (bill?"支払いを編集":"支払いを登録") + ' <button class="x" id="billClose">✕</button>';
+  $("b-name").value   = bill ? bill.name : (preset && preset.name || "");
+  $("b-amount").value = bill ? (bill.amount||"") : "";
+  $("b-day").value    = bill ? (bill.day||"") : "";
+  $("b-type").value   = bill ? (bill.type || "サブスク") : (preset && preset.type || "サブスク");
+  $("b-memo").value   = bill ? (bill.memo||"") : "";
+  $("b-account").innerHTML = accountOptionsHTML();
+  selectAccountValue($("b-account"), bill ? bill.account : (preset && preset.account || ""));
+  $("b-enabled").checked = bill ? (bill.enabled !== false) : true;
+  $("billSubmit").textContent = bill ? "更新する" : "登録する";
+  $("billSubmit").onclick = submitBill;
+  $("billClose").onclick = closeBillSheet;
+  $("billOverlay").style.display = "flex";
+}
+function closeBillSheet(){ editingBillId = null; $("billOverlay").style.display = "none"; }
+
+async function submitBill(){
+  const name = $("b-name").value.trim();
+  if(!name){ toast("名前を入力してください", true); return; }
+  const isEdit = !!editingBillId;
+  const editId = editingBillId;
+  const data = {
+    name,
+    day: parseInt($("b-day").value)||0,
+    amount: parseInt($("b-amount").value)||0,
+    type: $("b-type").value,
+    account: $("b-account").value || "",
+    memo: $("b-memo").value.trim(),
+    enabled: $("b-enabled").checked,
+  };
+  closeBillSheet();
+
+  // 楽観的更新（Notion確定を待たず即反映）
+  let optimistic = null;
+  if(isEdit){
+    const idx = bills.findIndex(b=>b.id===editId);
+    if(idx>=0){ bills[idx] = { ...bills[idx], ...data }; optimistic = bills[idx]; }
+  }else{
+    optimistic = { id:"temp-"+Date.now(), ...data };
+    bills.push(optimistic);
+  }
+  if(state.tab==="bills"||state.tab==="calendar") renderTab();
+  toast(isEdit ? "更新中…" : "登録中…");
+
+  try{
+    const body = { ...data };
+    if(isEdit) body.id = editId;
+    const r = await fetch(API + (isEdit ? "/bill/update" : "/bill/add"), {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify(body)
+    });
+    const d = await r.json();
+    if(!d.ok) throw new Error(d.error || "error");
+    if(!isEdit && optimistic) optimistic.id = d.id; // 仮IDを本物に差し替え
+    toast(isEdit ? "更新しました" : "登録しました");
+  }catch(e){
+    toast((isEdit?"更新":"登録")+"に失敗しました。再読み込みします", true);
+    await loadBills();
+    if(state.tab==="bills"||state.tab==="calendar") renderTab();
+  }
+}
+
+async function deleteBill(id){
+  if(!confirm("削除しますか？\n\n※Notionのゴミ箱に移動します")) return;
+  const backup = bills.slice();
+  bills = bills.filter(b=>b.id!==id);
+  if(state.tab==="bills"||state.tab==="calendar") renderTab();
+  toast("削除中…");
+  try{
+    const r = await fetch(API + "/bill/delete", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ id })
+    });
+    const d = await r.json();
+    if(!d.ok) throw new Error(d.error || "delete error");
+    toast("削除しました");
+  }catch(e){
+    toast("削除に失敗しました。元に戻します", true);
+    bills = backup;
+    if(state.tab==="bills"||state.tab==="calendar") renderTab();
+  }
+}
+$("billOverlay").onclick = closeBillSheet;
+$("billSubmit").onclick = submitBill;
+$("billClose").onclick = closeBillSheet;
+$("cardDayOverlay").onclick = closeCardDaySheet;
+$("cardDaySubmit").onclick = submitCardDay;
+
+// 全支払い：固定費DBの有効な支払い ＋ 口座DBに支払日があるカード。カレンダー・直近予定で使用
+function allPaymentItems(){
+  const cards = getCardAccounts()
+    .filter(a => a.day > 0)
+    .map(a => ({ id:"card:"+a.name, name:a.name, day:a.day, amount:0, type:"クレジットカード", account:a.name, _card:true }));
+  return [...bills.filter(b=> b.enabled!==false), ...cards];
+}
+function upcomingBills(){
+  const today = new Date(); today.setHours(0,0,0,0);
+  const y = today.getFullYear(), m = today.getMonth();
+  return allPaymentItems()
+    .filter(b=>b.day>0)
+    .map(b=>{
+      let target = new Date(y, m, b.day);
+      if(target < today) target = new Date(y, m+1, b.day);
+      const diff = Math.round((target - today) / 86400000);
+      return { ...b, target, diff };
+    })
+    .filter(b=>b.diff >= 0 && b.diff <= 14)
+    .sort((a,b)=>a.diff-b.diff);
+}
+
+function renderBills(c){
+  const upcoming = upcomingBills();
+  const cardAccounts = getCardAccounts();
+  const totalMonthly = bills.filter(b=>b.enabled!==false).reduce((s,b)=>s+(b.amount||0),0);
+
+  let html = '<div class="bills-header"><h3>支払い・サブスク管理</h3>'
+    + '<button class="bills-add-btn" id="billsAddBtn">＋ 追加</button></div>';
+
+  // 直近バナー
+  if(upcoming.length){
+    html += '<div class="upcoming-banner"><div class="ub-title">📅 直近の支払い予定</div><div class="ub-list">';
+    upcoming.slice(0,5).forEach(b=>{
+      const label = b.diff===0?"今日":b.diff===1?"明日":b.diff+"日後";
+      html += '<div class="ub-row"><span>'
+        + billIcon(b.type)+" "+b.name
+        + '<span class="ub-soon">'+label+'</span></span>'
+        + '<span>'+(b.amount?'¥'+b.amount.toLocaleString():"--")+'</span></div>';
+    });
+    html += '</div></div>';
+  }
+
+  // ── クレジットカード（口座DBの「支払日」で管理） ──
+  if(cardAccounts.length){
+    html += '<div class="bill-section-label">💳 クレジットカード</div>';
+    cardAccounts.forEach(a=>{
+      const dayLabel = a.day ? "毎月"+a.day+"日払い" : '<span style="color:var(--blue)">支払日を設定</span>';
+      html += '<div class="bill-card">'
+        + '<div class="bill-icon">💳</div>'
+        + '<div class="bill-info"><div class="bill-name">'+a.name+'</div>'
+        + '<div class="bill-sub">'+dayLabel+'</div>'
+        + '<div class="bill-actions">'
+        + '<button class="card-cfg-btn" data-name="'+a.name+'" data-day="'+(a.day||0)+'">⚙️ '+(a.day?"支払日を編集":"支払日を設定")+'</button>'
+        + '</div></div>'
+        + '<div class="bill-right">'
+        + '<div class="bill-day" style="color:var(--sub);font-size:11px">残高はNotionで管理</div>'
+        + '</div></div>';
+    });
+  }
+
+  // ── サブスク・固定費（種別ごと） ──
+  BILL_TYPE_ORDER.forEach(type=>{
+    const group = bills.filter(b=>b.type===type);
+    if(!group.length) return;
+    html += '<div class="bill-section-label">'+billIcon(type)+' '+type+'</div>';
+    group.sort((a,b)=>(a.day||99)-(b.day||99)).forEach(b=>{
+      const dayLabel = b.day ? "毎月"+b.day+"日" : "支払日未設定";
+      const off = b.enabled===false;
+      html += '<div class="bill-card'+(off?' bill-off':'')+'">'
+        + '<div class="bill-icon">'+billIcon(b.type)+'</div>'
+        + '<div class="bill-info"><div class="bill-name">'+b.name+(off?' <span style="font-size:10px;color:var(--sub)">(無効)</span>':'')+'</div>'
+        + '<div class="bill-sub">'+dayLabel+(b.account?" · "+b.account:"")+(b.memo?" · "+b.memo:"")+'</div>'
+        + '<div class="bill-actions">'
+        + '<button class="bill-edit" data-id="'+b.id+'">✏️ 編集</button>'
+        + '<button class="bill-del" data-id="'+b.id+'">🗑</button>'
+        + '</div></div>'
+        + '<div class="bill-right">'
+        + (b.amount?'<div class="bill-amt">¥'+b.amount.toLocaleString()+'</div>':'')
+        + '<div class="bill-day">'+dayLabel+'</div>'
+        + '</div></div>';
+    });
+  });
+
+  if(totalMonthly>0){
+    html += '<div class="bills-total" style="margin-top:8px"><span class="bt-label">固定費・サブスク 月合計</span>'
+      + '<span class="bt-val">¥'+totalMonthly.toLocaleString()+'</span></div>';
+  }
+
+  if(!bills.length && !cardAccounts.length){
+    html += '<div class="empty">まだ登録がありません<br><small>サブスク・固定費などを追加しましょう</small></div>';
+  }
+
+  c.innerHTML = html;
+  c.querySelector("#billsAddBtn").onclick = ()=>openBillSheet(null);
+  c.querySelectorAll(".bill-edit:not(.card-cfg-btn)").forEach(btn=>{
+    btn.onclick = ()=>{ const b=bills.find(x=>x.id===btn.dataset.id); if(b) openBillSheet(b); };
+  });
+  c.querySelectorAll(".bill-del").forEach(btn=>{
+    btn.onclick = ()=>deleteBill(btn.dataset.id);
+  });
+  c.querySelectorAll(".card-cfg-btn").forEach(btn=>{
+    btn.onclick = ()=> openCardDaySheet(btn.dataset.name, parseInt(btn.dataset.day)||0);
+  });
+}
+
+
+// ============================================================
+//  カレンダー
+// ============================================================
+let calYear = new Date().getFullYear();
+let calMonth = new Date().getMonth(); // 0-based
+let calSelectedDay = null;
+
+function renderCalendar(c){
+  const today = new Date(); today.setHours(0,0,0,0);
+
+  // 取引をday単位でまとめる
+  const txByDay = {};
+  const s = state.summary;
+  if(s && s.transactions){
+    s.transactions.forEach(t=>{
+      if(!t.date) return;
+      const d = t.date.slice(0,10);
+      (txByDay[d] = txByDay[d]||[]).push(t);
+    });
+  }
+
+  // 支払日をday単位でまとめる（クレカ含む全アイテム）
+  const billsByDay = {};
+  allPaymentItems().forEach(b=>{
+    if(!b.day) return;
+    const d = new Date(calYear, calMonth, b.day);
+    if(d.getMonth()!==calMonth) return; // 月末オーバー（例:2月30日）
+    const key = calYear+"-"+String(calMonth+1).padStart(2,"0")+"-"+String(b.day).padStart(2,"0");
+    (billsByDay[key]=billsByDay[key]||[]).push(b);
+  });
+
+  const firstDay = new Date(calYear, calMonth, 1).getDay(); // 0=Sun
+  const lastDate = new Date(calYear, calMonth+1, 0).getDate();
+  const monthStr = calYear+"年"+(calMonth+1)+"月";
+
+  let html = '<div class="cal-nav">'
+    + '<button id="calPrev">‹</button>'
+    + '<span class="cal-title">'+monthStr+'</span>'
+    + '<button id="calNext">›</button></div>';
+
+  html += '<div class="cal-grid">';
+  ["日","月","火","水","木","金","土"].forEach(d=>{
+    html += '<div class="cal-dow">'+d+'</div>';
+  });
+
+  // 前月の埋め
+  const prevLast = new Date(calYear, calMonth, 0).getDate();
+  for(let i=0;i<firstDay;i++){
+    const day = prevLast - firstDay + 1 + i;
+    html += '<div class="cal-cell other-month"><div class="cday">'+day+'</div></div>';
+  }
+
+  for(let d=1;d<=lastDate;d++){
+    const key = calYear+"-"+String(calMonth+1).padStart(2,"0")+"-"+String(d).padStart(2,"0");
+    const txs = txByDay[key]||[];
+    const bls = billsByDay[key]||[];
+    const isToday = (new Date(calYear,calMonth,d).getTime()===today.getTime());
+    const isSelected = (calSelectedDay===key);
+    const dayTotal = txs.filter(t=>!(t.kind||"").includes("収入")).reduce((s,t)=>s+t.amount,0);
+    html += '<div class="cal-cell'+(isToday?" today":"")+(isSelected?" selected":"")+'" data-key="'+key+'">';
+    html += '<div class="cday">'+d+'</div>';
+    if(txs.length||bls.length){
+      html += '<div class="cdots">';
+      txs.slice(0,3).forEach(()=>{ html+='<span class="cdot-tx"></span>'; });
+      bls.forEach(()=>{ html+='<span class="cdot-bill"></span>'; });
+      html += '</div>';
+      if(dayTotal>0) html += '<div class="ctotal">'+Math.round(dayTotal/1000)+'k</div>';
+    }
+    html += '</div>';
+  }
+
+  // 次月の埋め
+  const used = firstDay + lastDate;
+  const remain = (7 - (used%7)) % 7;
+  for(let i=1;i<=remain;i++){
+    html += '<div class="cal-cell other-month"><div class="cday">'+i+'</div></div>';
+  }
+  html += '</div>'; // cal-grid
+
+  // 選択日の詳細
+  if(calSelectedDay){
+    const txs = txByDay[calSelectedDay]||[];
+    const bls = billsByDay[calSelectedDay]||[];
+    if(txs.length||bls.length){
+      html += '<div class="day-detail"><div class="dd-head">'+calSelectedDay.slice(5).replace("-","月")+'日</div>';
+      txs.forEach(t=>{
+        const inc = (t.kind||"").includes("収入");
+        html += '<div class="dd-row"><div><div>'+(t.memo||t.category||"（無題）")+'</div>'
+          +'<div class="dd-cat">'+(t.category||"")+(t.subcategory?" > "+t.subcategory:"")+'</div></div>'
+          +'<div class="dd-amt" style="color:'+(inc?"var(--green)":"var(--red)")+'">'
+          +(inc?"+":"−")+"¥"+t.amount.toLocaleString()+'</div></div>';
+      });
+      bls.forEach(b=>{
+        html += '<div class="dd-row"><div><div>'+billIcon(b.type)+" "+b.name+'</div>'
+          +'<div class="dd-cat">支払予定日'+(b.account?" · "+b.account:"")+'</div></div>'
+          +'<div class="dd-amt dd-bill">'+(b.amount?"¥"+b.amount.toLocaleString():"金額未登録")+'</div></div>';
+      });
+      html += '</div>';
+    }
+  }
+
+  c.innerHTML = html;
+
+  c.querySelector("#calPrev").onclick = ()=>{
+    calMonth--; if(calMonth<0){calMonth=11;calYear--;} calSelectedDay=null; renderTab();
+  };
+  c.querySelector("#calNext").onclick = ()=>{
+    calMonth++; if(calMonth>11){calMonth=0;calYear++;} calSelectedDay=null; renderTab();
+  };
+  c.querySelectorAll(".cal-cell:not(.other-month)").forEach(cell=>{
+    cell.onclick = ()=>{
+      calSelectedDay = calSelectedDay===cell.dataset.key ? null : cell.dataset.key;
+      renderTab();
+    };
+  });
+}
+
+// カレンダーの表示月を取引の会計月に合わせてリセット
+function syncCalToMonth(){
+  const [y,m] = state.month.split("-").map(Number);
+  calYear = y; calMonth = m-1; calSelectedDay = null;
+}
+
 </script>
 </body>
 </html>
