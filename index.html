@@ -233,6 +233,7 @@
 
     <!-- カテゴリ（支出・収入のとき表示） -->
     <div class="mb" id="catWrap"><label class="fld">カテゴリ</label><select id="f-category"></select></div>
+    <div class="mb" id="subWrap" style="display:none"><label class="fld">サブカテゴリ</label><select id="f-subcategory"></select></div>
 
     <!-- 口座：支出=出金元 / 収入=入金先 / 移動=両方 -->
     <div class="mb" id="accOutWrap"><label class="fld" id="accOutLabel">口座（出金元）</label><select id="f-accountOut"></select></div>
@@ -411,7 +412,7 @@ function renderTab(){
       const inc = (t.kind||"").includes("収入");
       return '<div class="txrow"><div class="txmain" data-i="'+i+'" style="flex:1;min-width:0">'
         + '<div class="m">'+(t.memo || t.category || "（無題）")+'</div>'
-        + '<div class="s">'+ (t.date? t.date.slice(5,10):"") +' · '+(t.category||"")+' · '+(t.kind||"").replace(/\s/g,"")+'</div></div>'
+        + '<div class="s">'+ (t.date? t.date.slice(5,10):"") +' · '+(t.category||"")+(t.subcategory?' ＞ '+t.subcategory:'')+' · '+(t.kind||"").replace(/\s/g,"")+'</div></div>'
         + '<div class="a" data-i="'+i+'" style="color:'+(inc?"var(--green)":"var(--ink)")+'">'+(inc?"+":"−")+yen(t.amount)+'</div>'
         + '<button class="del" data-id="'+t.id+'" data-label="'+(t.category||"")+' '+yen(t.amount)+'">🗑</button></div>';
     }).join("");
@@ -473,6 +474,24 @@ async function renderBalances(c){
 
 // ---- プルダウン生成 ----
 // 口座を分類（タイプ）ごとにグループ化した <optgroup> を作る
+// カテゴリの表示順（似た項目を隣に）。ここに無い名前は末尾へ。
+const CATEGORY_ORDER = [
+  "美容品","美容施術","衣服","日用雑貨",
+  "食費","交際費","エンタメ","サブスク",
+  "教育・教養","交通","医療・保険",
+  "固定費","税金","特別費","調節費用"
+];
+function catRank(name){
+  const i = CATEGORY_ORDER.indexOf(name);
+  return i === -1 ? 999 : i;
+}
+function sortCats(cats){
+  return cats.slice().sort((a,b)=>{
+    const r = catRank(a.name) - catRank(b.name);
+    return r !== 0 ? r : a.name.localeCompare(b.name, "ja");
+  });
+}
+
 const TYPE_ORDER = ["銀行","カード系列","証券口座","電子決済","現金","非通常用途","その他"];
 function accountOptionsHTML(){
   const accs = state.options.accounts; // [{name, type}]
@@ -503,7 +522,25 @@ function refreshCategorySelect(type){
     if(type==="move") return false;
     return k.includes("支出") || k.includes("固定費");
   });
-  catSel.innerHTML = cats.map(c=>'<option>'+c.name+'</option>').join("");
+  catSel.innerHTML = sortCats(cats).map(c=>'<option>'+c.name+'</option>').join("");
+  refreshSubSelect(catSel.value);
+}
+// サブカテゴリ（親に応じて中身を出す。無ければ欄を隠す）
+function subListOf(category){
+  return (state.options.subcats && state.options.subcats[category]) || [];
+}
+function subOptionsHTML(category, selected){
+  const subs = subListOf(category);
+  let html = '<option value="">（指定なし）</option>';
+  html += subs.map(s=>'<option'+(s===selected?' selected':'')+'>'+s+'</option>').join("");
+  return html;
+}
+function refreshSubSelect(category, selected){
+  const subs = subListOf(category);
+  const wrap = $("subWrap"), sel = $("f-subcategory");
+  if(!subs.length){ wrap.style.display = "none"; sel.innerHTML = '<option value=""></option>'; return; }
+  wrap.style.display = "block";
+  sel.innerHTML = subOptionsHTML(category, selected);
 }
 // モードに応じて表示するフィールドを切り替える
 function applyTypeUI(type){
@@ -549,6 +586,9 @@ async function submitTx(){
     if(type==="income"){ accountIn = $("f-accountOut").value; }  // 収入は「口座（入金先）」をf-accountOutに表示
     else { accountOut = $("f-accountOut").value; }
   }
+  // サブカテゴリ（親に属する有効な値のときだけ採用）
+  let subcategory = (type==="move") ? "" : $("f-subcategory").value;
+  if(subcategory && !subListOf(category).includes(subcategory)) subcategory = "";
 
   const isEdit = !!editingId;
   const kindOf = {}; state.options.categories.forEach(c=> kindOf[c.name]=c.kind);
@@ -562,7 +602,7 @@ async function submitTx(){
   if(txMonth === state.month){
     const s = state.summary;
     if(s){
-      const row = { id: isEdit?editId:("temp-"+Date.now()), date, amount, category, kind, account: accountForView, memo };
+      const row = { id: isEdit?editId:("temp-"+Date.now()), date, amount, category, subcategory, kind, account: accountForView, memo };
       if(!isEdit) row._pending = true;
       if(isEdit){
         const idx = s.transactions.findIndex(t=>t.id===editId);
@@ -578,7 +618,7 @@ async function submitTx(){
 
   // --- 裏でNotionに保存 ---
   try{
-    const body = { date, amount, category, memo };
+    const body = { date, amount, category, memo, subcategory };
     if(accountOut) body.accountOut = accountOut;
     if(accountIn)  body.accountIn  = accountIn;
     if(isEdit) body.id = editId;
@@ -648,6 +688,7 @@ function openEditSheet(t){
   $("f-amount").value = t.amount || "";
   $("f-memo").value = t.memo || "";
   if(t.category) $("f-category").value = t.category;
+  refreshSubSelect($("f-category").value, t.subcategory || "");
   // 口座は「有効な口座名のときだけ」選択。未設定・不明なら（選択なし）に戻す
   // （セレクトは使い回しのため、前回の編集で選んだ口座が残らないよう必ずリセット）
   selectAccountValue($("f-accountOut"), t.account);
@@ -686,6 +727,7 @@ $("sheetClose").onclick = closeSheet;
 $("overlay").onclick = closeSheet;
 $("submitBtn").onclick = submitTx;
 $("f-date").onchange = updateMonthHint;
+$("f-category").onchange = ()=> refreshSubSelect($("f-category").value);
 document.querySelectorAll("#typeSeg button").forEach(b=>{
   b.onclick = ()=> setType(b.dataset.type);
 });
@@ -768,16 +810,17 @@ function fileToBase64(file){
   });
 }
 
-// 全カテゴリの <option>（種類でグループ化）
+// 全カテゴリの <option>（似た項目順のフラット表示）
 function allCategoryOptionsHTML(selected){
   const cats = state.options.categories || [];
-  const groups = {};
-  cats.forEach(c=>{ const k=(c.kind||"その他").replace(/\s/g,""); (groups[k]=groups[k]||[]).push(c.name); });
-  let html = '<option value="">（未分類）</option>';
-  Object.keys(groups).forEach(k=>{
-    html += '<optgroup label="'+k+'">' + groups[k].map(n=>
-      '<option'+(n===selected?' selected':'')+'>'+n+'</option>').join("") + '</optgroup>';
-  });
+  // 収入・移動・調節は通常レシートでは使わないので末尾へ寄せる
+  const isLate = c => /収入|移動|調節/.test((c.kind||"")+c.name);
+  const main = sortCats(cats.filter(c=>!isLate(c)));
+  const late = sortCats(cats.filter(isLate));
+  const opt = c => '<option'+(c.name===selected?' selected':'')+'>'+c.name+'</option>';
+  let html = '<option value=""'+(selected?'':' selected')+'>（未分類）</option>';
+  html += main.map(opt).join("");
+  if(late.length) html += '<option disabled>──────</option>' + late.map(opt).join("");
   return html;
 }
 function kindOfCat(name){
@@ -803,14 +846,20 @@ async function startScan(files){
     });
     const d = await r.json();
     if(!d.ok) throw new Error(d.error || "parse error");
-    const rows = (d.transactions || []).map(t=>({
-      date: (t.date||"").slice(0,10),
-      amount: Math.abs(Math.round(Number(t.amount)||0)),
-      name: t.name || "",
-      category: t.category || "",
-      kind: t.kind || kindOfCat(t.category||""),
-      account: "",
-    }));
+    const rows = (d.transactions || []).map(t=>{
+      const category = t.category || "";
+      let sub = t.subcategory || "";
+      if(sub && !subListOf(category).includes(sub)) sub = "";
+      return {
+        date: (t.date||"").slice(0,10),
+        amount: Math.abs(Math.round(Number(t.amount)||0)),
+        name: t.name || "",
+        category,
+        subcategory: sub,
+        kind: t.kind || kindOfCat(category),
+        account: "",
+      };
+    });
     if(!rows.length){ $("reviewList").innerHTML = '<div class="empty">取引を読み取れませんでした</div>'; return; }
 
     // 重複判定（既存取引 + バッチ内の重複）
@@ -851,13 +900,18 @@ function renderReview(){
     +   '<input type="date" class="rdate" value="'+r.date+'" data-i="'+i+'">'
     +   '<input type="number" inputmode="numeric" class="ramount" value="'+r.amount+'" data-i="'+i+'">'
     +   '<select class="rcat" data-i="'+i+'">'+allCategoryOptionsHTML(r.category)+'</select>'
-    +   '<select class="racc" data-i="'+i+'">'+accHTML+'</select>'
+    +   '<select class="rsub" data-i="'+i+'">'+subOptionsHTML(r.category, r.subcategory)+'</select>'
+    +   '<select class="racc full" data-i="'+i+'">'+accHTML+'</select>'
     + '</div></div>'
   ).join("");
 
   // 口座の初期値を反映
   $("reviewList").querySelectorAll(".racc").forEach(sel=>{
     selectAccountValue(sel, scanRows[sel.dataset.i].account);
+  });
+  // サブが無い親のときはサブ欄を隠す
+  $("reviewList").querySelectorAll(".rsub").forEach(sel=>{
+    sel.style.display = subListOf(scanRows[sel.dataset.i].category).length ? "" : "none";
   });
 
   // 編集イベント
@@ -870,8 +924,13 @@ function renderReview(){
   L.querySelectorAll(".rdate").forEach(el=> el.onchange = ()=>{ scanRows[el.dataset.i].date = el.value; });
   L.querySelectorAll(".ramount").forEach(el=> el.oninput = ()=>{ scanRows[el.dataset.i].amount = Math.abs(parseInt(el.value,10)||0); });
   L.querySelectorAll(".rcat").forEach(el=> el.onchange = ()=>{
-    const r = scanRows[el.dataset.i]; r.category = el.value; r.kind = kindOfCat(el.value);
+    const i = el.dataset.i, r = scanRows[i];
+    r.category = el.value; r.kind = kindOfCat(el.value); r.subcategory = "";
+    const sub = L.querySelector('.rsub[data-i="'+i+'"]');
+    sub.innerHTML = subOptionsHTML(r.category, "");
+    sub.style.display = subListOf(r.category).length ? "" : "none";
   });
+  L.querySelectorAll(".rsub").forEach(el=> el.onchange = ()=>{ scanRows[el.dataset.i].subcategory = el.value; });
   L.querySelectorAll(".racc").forEach(el=> el.onchange = ()=>{ scanRows[el.dataset.i].account = el.value; });
 
   $("bulkAcc").onchange = ()=>{
@@ -902,6 +961,7 @@ async function submitScan(){
     try{
       const body = { date:r.date, amount:r.amount, category:r.category, memo:r.name };
       if(r.account) body.account = r.account;
+      if(r.subcategory) body.subcategory = r.subcategory;
       const resp = await fetch(API + "/add", {
         method:"POST", headers:{"Content-Type":"application/json"},
         body: JSON.stringify(body)
