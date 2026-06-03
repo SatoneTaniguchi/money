@@ -266,6 +266,20 @@
   .ilog-btn-cancel{background:#e8e2d6;color:var(--ink)}
   .ilog-btn-save{background:var(--navy);color:#fff}
 
+
+  .ilog-toggle-btn{width:100%;background:none;border:none;font-family:inherit;font-size:12px;
+    color:var(--navy);cursor:pointer;padding:6px 0 2px;text-align:left;display:flex;align-items:center;gap:4px}
+  .ilog-toggle-btn:active{opacity:.6}
+  .ilog-tx-list{margin-top:8px;border-top:1px solid #f0ede6;padding-top:8px;display:none}
+  .ilog-tx-list.open{display:block}
+  .ilog-tx-row{display:flex;justify-content:space-between;align-items:baseline;
+    font-size:12px;padding:4px 0;border-bottom:1px solid #f7f5f0;gap:8px}
+  .ilog-tx-row:last-child{border-bottom:none}
+  .ilog-tx-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink)}
+  .ilog-tx-date{color:var(--sub);flex-shrink:0;font-size:11px}
+  .ilog-tx-amt{font-weight:700;flex-shrink:0;color:var(--red);font-variant-numeric:tabular-nums}
+  .ilog-tx-cat{font-size:11px;color:var(--sub);flex-shrink:0}
+
 </style>
 </head>
 <body>
@@ -1287,7 +1301,6 @@ function saveIlogEntries(arr){
 function autoAddIlogFromScan(rows, files){
   const dates = (rows||[]).map(r=>r.date).filter(Boolean).sort();
   const today = new Date().toISOString().slice(0,10);
-  // ファイル数をメモに
   const fileCount = (files && files.length) ? files.length + 'ファイル読込' : '';
   const noTx = (!rows || !rows.length);
   const entry = {
@@ -1297,7 +1310,11 @@ function autoAddIlogFromScan(rows, files){
     to: dates[dates.length-1] || today,
     memo: [fileCount, noTx ? '取引データなし' : ''].filter(Boolean).join(' / '),
     savedAt: new Date().toISOString(),
-    _pending: !noTx   // 取引なしなら即確定（口座選択不要）
+    _pending: !noTx,
+    // 解析した取引データをスナップショットとして保存
+    txSnapshot: (rows||[]).map(r=>({
+      date: r.date, name: r.name, amount: r.amount, category: r.category
+    }))
   };
   const entries = getIlogEntries();
   entries.push(entry);
@@ -1364,6 +1381,23 @@ function renderImportLog(){
       const period = e.from && e.to ? e.from + ' 〜 ' + e.to
                    : e.from ? e.from + ' 〜' : e.to ? '〜 ' + e.to : '';
       const pendingBadge = e._pending ? '<span class="ilog-badge-pending">確認中</span>' : '';
+      const txs = e.txSnapshot || [];
+      const txCount = txs.length;
+      const txListId = 'ilog-txlist-' + e.id;
+
+      // 取引リストHTML
+      let txRowsHtml = '';
+      if(txCount > 0){
+        txRowsHtml = txs.map(t =>
+          `<div class="ilog-tx-row">
+            <span class="ilog-tx-date">${t.date||''}</span>
+            <span class="ilog-tx-name">${t.name||'（不明）'}</span>
+            <span class="ilog-tx-cat">${t.category||''}</span>
+            <span class="ilog-tx-amt">¥${(t.amount||0).toLocaleString()}</span>
+          </div>`
+        ).join('');
+      }
+
       html += `<div class="ilog-card${e._pending?' ilog-pending':''}">
         <div class="ilog-card-head">
           <div>
@@ -1376,6 +1410,13 @@ function renderImportLog(){
           </div>
         </div>
         ${e.memo ? `<div class="ilog-memo">${e.memo}</div>` : ''}
+        ${txCount > 0 ? `
+        <button class="ilog-toggle-btn" onclick="ilogToggleTx('${txListId}', this)">
+          ▶ 取込取引 ${txCount}件を見る
+        </button>
+        <div class="ilog-tx-list" id="${txListId}">
+          ${txRowsHtml}
+        </div>` : '<div style="font-size:12px;color:var(--sub);margin-top:6px">取引データなし</div>'}
       </div>`;
     });
   }
@@ -1386,6 +1427,14 @@ function renderImportLog(){
 function ilogClearFilter(){
   ilogFilter = { source:'', dateFrom:'', dateTo:'' };
   renderImportLog();
+}
+
+function ilogToggleTx(listId, btn){
+  const el = document.getElementById(listId);
+  if(!el) return;
+  const open = el.classList.toggle('open');
+  btn.textContent = (open ? '▼ 取込取引 ' : '▶ 取込取引 ')
+    + el.querySelectorAll('.ilog-tx-row').length + '件を' + (open ? '閉じる' : '見る');
 }
 
 function openIlogModal(id){
