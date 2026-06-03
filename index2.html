@@ -498,9 +498,19 @@ function toast(msg, isErr){
 }
 
 // ---- ローカルで集計を再計算（Notionの確定を待たず即反映するため）----
+// 支出の合計（予算消化）に含めないカテゴリ：調節費用・立て替え
+function isExcludedCategory(category){
+  return category === "調節費用" || category === "立て替え";
+}
+// NMD（ノーマネーデー：お金を使わない目標の日）の判定。カテゴリ名・収支種類どちらも "NMD"
+function isNMDCategory(category, kind){
+  const n = (category||"").replace(/\s/g,"");
+  const k = (kind||"").replace(/\s/g,"");
+  return n === "NMD" || k.includes("NMD");
+}
 function classifyLocal(kind, category){
-  // 調節費用は支出に含めない
-  if(category === "調節費用") return "ignore";
+  // 調節費用・立て替え・NMD は支出に含めない
+  if(isExcludedCategory(category) || isNMDCategory(category, kind)) return "ignore";
   const k = (kind||"").replace(/\s/g,"");
   if(k.includes("固定費")) return "fixed";
   if(k.includes("収入")) return "income";
@@ -628,10 +638,14 @@ function renderTab(){
     if(!s.transactions.length){ c.innerHTML = '<div class="empty">この月の取引はありません</div>'; return; }
     c.innerHTML = s.transactions.map((t,i)=>{
       const inc = (t.kind||"").includes("収入");
+      const nmd = isNMDCategory(t.category, t.kind);
+      const amtCell = nmd
+        ? '<div class="a" data-i="'+i+'" style="color:var(--green);font-size:13px">🎯 NMD</div>'
+        : '<div class="a" data-i="'+i+'" style="color:'+(inc?"var(--green)":"var(--ink)")+'">'+(inc?"+":"−")+yen(t.amount)+'</div>';
       return '<div class="txrow"><div class="txmain" data-i="'+i+'" style="flex:1;min-width:0">'
         + '<div class="m">'+(t.memo || t.category || "（無題）")+'</div>'
         + '<div class="s">'+ (t.date? t.date.slice(5,10):"") +' · '+(t.category||"")+(t.subcategory?' ＞ '+t.subcategory:'')+' · '+(t.kind||"").replace(/\s/g,"")+'</div></div>'
-        + '<div class="a" data-i="'+i+'" style="color:'+(inc?"var(--green)":"var(--ink)")+'">'+(inc?"+":"−")+yen(t.amount)+'</div>'
+        + amtCell
         + '<button class="del" data-id="'+t.id+'" data-label="'+(t.category||"")+' '+yen(t.amount)+'">🗑</button></div>';
     }).join("");
     // 行（金額・内容部分）タップで編集シートを開く
@@ -706,7 +720,7 @@ const CATEGORY_ORDER = [
   "美容品","美容施術","衣服","日用雑貨",
   "食費","交際費","エンタメ","サブスク",
   "教育・教養","交通","医療・保険",
-  "固定費","税金","特別費","調節費用"
+  "固定費","税金","特別費","調節費用","立て替え","NMD"
 ];
 function catRank(name){
   const i = CATEGORY_ORDER.indexOf(name);
@@ -747,6 +761,7 @@ const CAT_COLOR_MAP = {
   "教育・教養":"#3f7d5c","交通":"#3f7d5c",
   "医療・保険":"#6a5a8c","固定費":"#6a5a8c",
   "税金":"#8c6a4a","特別費":"#8c6a4a","調節費用":"#8c6a4a",
+  "立て替え":"#7a8c8c","NMD":"#5a9c6a",
 };
 const CAT_GROUPS_DEF = [
   { label:"日常生活",      cats:["食費","日用雑貨","美容品","美容施術","衣服"],  color:"#e07b54" },
@@ -754,6 +769,7 @@ const CAT_GROUPS_DEF = [
   { label:"自己投資・移動",cats:["教育・教養","交通"],                           color:"#3f7d5c" },
   { label:"医療・保険・固定",cats:["医療・保険","固定費"],                       color:"#6a5a8c" },
   { label:"税金・特別・その他",cats:["税金","特別費","調節費用"],                color:"#8c6a4a" },
+  { label:"立替・ノーマネー",cats:["立て替え","NMD"],                            color:"#5a9c6a" },
 ];
 function catColor(name){ return CAT_COLOR_MAP[name] || "#888"; }
 
@@ -789,11 +805,12 @@ function groupedCategoryOptionsHTML(cats, selectedValue){
 
 function refreshCategorySelect(type){
   const catSel = $("f-category");
-  // 収入なら収入カテゴリ、支出なら支出系（移動/NMD/調節費用は対象外）
+  // 収入なら収入カテゴリ、支出なら支出系（移動は対象外）。立て替え・NMDは種別を問わず支出タブで選べる
   const cats = state.options.categories.filter(c=>{
     const k = (c.kind||"").replace(/\s/g,"");
     if(type==="income") return k.includes("収入");
     if(type==="move") return false;
+    if(c.name==="立て替え" || isNMDCategory(c.name, c.kind)) return true;
     return k.includes("支出") || k.includes("固定費");
   });
   const sorted = sortCats(cats);
@@ -838,10 +855,17 @@ let editingId = null;  // null=追加モード, 値あり=編集モード
 
 async function submitTx(){
   const type = document.querySelector("#typeSeg .on").dataset.type; // expense/income/move
-  const amount = parseInt($("f-amount").value,10);
+  let amount = parseInt($("f-amount").value,10);
   const date = $("f-date").value;
   const memo = $("f-memo").value;
-  if(!amount || amount<=0){ toast("金額を入力してください", true); return; }
+  // NMD（ノーマネーデー）は0円で登録OK。それ以外は金額必須
+  const selCatName = (type==="move") ? "" : $("f-category").value;
+  const isNMD = isNMDCategory(selCatName);
+  if(isNMD){
+    if(isNaN(amount) || amount<0) amount = 0;
+  }else{
+    if(!amount || amount<=0){ toast("金額を入力してください", true); return; }
+  }
   if(!date){ toast("日付を選んでください", true); return; }
 
   // モード別に、カテゴリ・出金先・入金先を決める
@@ -1006,7 +1030,11 @@ $("sheetClose").onclick = closeSheet;
 $("overlay").onclick = closeSheet;
 $("submitBtn").onclick = submitTx;
 $("f-date").onchange = updateMonthHint;
-$("f-category").onchange = ()=>{ updateCatDot($("f-category").value); refreshSubSelect($("f-category").value); };
+$("f-category").onchange = ()=>{
+  const v = $("f-category").value;
+  updateCatDot(v); refreshSubSelect(v);
+  if(isNMDCategory(v)){ $("f-amount").value = "0"; }   // ノーマネーデーは0円
+};
 document.querySelectorAll("#typeSeg button").forEach(b=>{
   b.onclick = ()=> setType(b.dataset.type);
 });
@@ -1053,8 +1081,15 @@ $("paydayClose").onclick = ()=>{ $("payday").style.display = "none"; };
 // ============================================================
 let scanRows = [];   // 解析結果（編集対象）
 
-// 重複判定キー：日付|金額|名前（全角半角・空白を無視）
-function normKey(s){ return (s||"").toLowerCase().replace(/[\s　]/g,"").replace(/（/g,"(").replace(/）/g,")"); }
+// 重複判定キー：日付|金額|名前（全角半角・空白・区切り記号の揺れを吸収）
+function normKey(s){
+  return (s||"")
+    // 全角の英数字・記号（！〜～）を半角へ寄せる（例：Ｐａｓａｒ→pasar、ＪＲ→jr）
+    .replace(/[\uFF01-\uFF5E]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0))
+    .toLowerCase()
+    // 空白・中黒・各種ダッシュ・記号類を除去（AIの表記ゆれを吸収）
+    .replace(/[\s\u3000・･.,\u2010-\u2015\u2212ー－—\-_/|&'"’`()（）]/g, "");
+}
 function dupKey(date, amount, name){
   return (date||"").slice(0,10) + "|" + Math.abs(Math.round(Number(amount)||0)) + "|" + normKey(name);
 }
@@ -1891,7 +1926,10 @@ function renderCalendar(c){
     const bls = billsByDay[key]||[];
     const isToday = (new Date(calYear,calMonth,d).getTime()===today.getTime());
     const isSelected = (calSelectedDay===key);
-    const dayTotal = txs.filter(t=>!(t.kind||"").includes("収入")).reduce((s,t)=>s+t.amount,0);
+    // 立て替え・NMD・調節費用などは支出に数えない
+    const dayTotal = txs.filter(t=> !(t.kind||"").includes("収入") && classifyLocal(t.kind, t.category)!=="ignore")
+                        .reduce((s,t)=>s+t.amount,0);
+    const hasNMD = txs.some(t=> isNMDCategory(t.category, t.kind));
     html += '<div class="cal-cell'+(isToday?" today":"")+(isSelected?" selected":"")+'" data-key="'+key+'">';
     html += '<div class="cday">'+d+'</div>';
     if(txs.length||bls.length){
@@ -1899,7 +1937,8 @@ function renderCalendar(c){
       txs.slice(0,3).forEach(()=>{ html+='<span class="cdot-tx"></span>'; });
       bls.forEach(()=>{ html+='<span class="cdot-bill"></span>'; });
       html += '</div>';
-      if(dayTotal>0) html += '<div class="ctotal">'+Math.round(dayTotal/1000)+'k</div>';
+      if(hasNMD) html += '<div class="ctotal" style="color:var(--green);font-weight:700">🎯NMD</div>';
+      else if(dayTotal>0) html += '<div class="ctotal">'+Math.round(dayTotal/1000)+'k</div>';
     }
     html += '</div>';
   }
@@ -1920,10 +1959,13 @@ function renderCalendar(c){
       html += '<div class="day-detail"><div class="dd-head">'+calSelectedDay.slice(5).replace("-","月")+'日</div>';
       txs.forEach(t=>{
         const inc = (t.kind||"").includes("収入");
+        const nmd = isNMDCategory(t.category, t.kind);
+        const amtHtml = nmd
+          ? '<div class="dd-amt" style="color:var(--green)">🎯 NMD</div>'
+          : '<div class="dd-amt" style="color:'+(inc?"var(--green)":"var(--red)")+'">'+(inc?"+":"−")+"¥"+t.amount.toLocaleString()+'</div>';
         html += '<div class="dd-row"><div><div>'+(t.memo||t.category||"（無題）")+'</div>'
           +'<div class="dd-cat">'+(t.category||"")+(t.subcategory?" > "+t.subcategory:"")+'</div></div>'
-          +'<div class="dd-amt" style="color:'+(inc?"var(--green)":"var(--red)")+'">'
-          +(inc?"+":"−")+"¥"+t.amount.toLocaleString()+'</div></div>';
+          +amtHtml+'</div>';
       });
       bls.forEach(b=>{
         html += '<div class="dd-row"><div><div>'+billIcon(b.type)+" "+b.name+'</div>'
