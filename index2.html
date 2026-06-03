@@ -204,6 +204,7 @@
   .bill-actions{display:flex;gap:6px;margin-top:6px}
   .bill-del{background:none;border:none;font-size:14px;cursor:pointer;opacity:.4;padding:2px}
   .bill-edit{background:none;border:none;font-size:12px;cursor:pointer;color:var(--navy);padding:2px;font-family:inherit}
+  .bill-ics{background:none;border:none;font-size:12px;cursor:pointer;color:var(--green);padding:2px;font-family:inherit}
   .upcoming-banner{background:linear-gradient(135deg,var(--navy),var(--navy2));border-radius:16px;padding:14px 16px;color:#fff;margin-bottom:8px}
   .upcoming-banner .ub-title{font-size:11px;opacity:.7;margin-bottom:6px}
   .upcoming-banner .ub-list{display:flex;flex-direction:column;gap:4px}
@@ -306,6 +307,17 @@
     <div class="mb"><label class="fld">毎月の支払日</label><input id="cd-day" type="number" inputmode="numeric" min="1" max="31" placeholder="例: 27" /></div>
     <div class="hint">この支払日はNotionの口座DBの「支払日」に保存されます</div>
     <button class="submit" id="cardDaySubmit">保存する</button>
+  </div>
+</div>
+
+<!-- 今月の予算 編集シート（月ページの「予算」に保存） -->
+<div class="overlay" id="budgetOverlay" style="display:none">
+  <div class="sheet" onclick="event.stopPropagation()">
+    <h2 id="budgetTitle">今月の予算 <button class="x" id="budgetClose">✕</button></h2>
+    <label class="fld">予算（円）</label>
+    <input class="amount mb" id="bg-amount" type="number" inputmode="numeric" placeholder="0" />
+    <div class="hint">この月の予算としてNotionの月ページに保存されます</div>
+    <button class="submit" id="budgetSubmit">保存する</button>
   </div>
 </div>
 
@@ -474,7 +486,7 @@ async function loadSummary(){
 
 function renderHero(){
   const s = state.summary;
-  $("budget").textContent = yen(s.budget);
+  $("budget").innerHTML = yen(s.budget) + ' <span style="opacity:.55;font-size:11px">✎</span>';
   $("used").textContent = yen(s.variableExpense);
   $("remain").textContent = yen(s.budgetRemaining);
   $("remain").style.color = s.budgetRemaining < 0 ? "var(--over)" : "var(--good)";
@@ -1309,6 +1321,47 @@ $("billClose").onclick = closeBillSheet;
 $("cardDayOverlay").onclick = closeCardDaySheet;
 $("cardDaySubmit").onclick = submitCardDay;
 
+// ---- 今月の予算 編集 ----
+function openBudgetSheet(){
+  const s = state.summary; if(!s) return;
+  $("budgetTitle").innerHTML = state.month + ' の予算 <button class="x" id="budgetClose">✕</button>';
+  $("bg-amount").value = s.budget || "";
+  $("budgetClose").onclick = ()=>{ $("budgetOverlay").style.display="none"; };
+  $("budgetOverlay").style.display = "flex";
+}
+async function submitBudget(){
+  const v = parseInt($("bg-amount").value,10);
+  if(!(v>=0)){ toast("予算を入力してください", true); return; }
+  const month = state.month;
+  $("budgetOverlay").style.display = "none";
+  // 楽観的更新
+  const s = state.summary;
+  if(s){
+    s.budget = v;
+    s.budgetUsedPct = v>0 ? (s.variableExpense/v)*100 : 0;
+    s.budgetRemaining = v - s.variableExpense;
+    renderHero();
+  }
+  toast("保存中…");
+  try{
+    const r = await fetch(API + "/budget", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ month, budget:v })
+    });
+    const d = await r.json();
+    if(!d.ok) throw new Error(d.error || "error");
+    toast("予算を保存しました");
+  }catch(e){
+    toast("予算の保存に失敗: "+e.message, true);
+    await loadSummary();
+  }
+}
+$("budgetOverlay").onclick = ()=>{ $("budgetOverlay").style.display="none"; };
+$("budgetSubmit").onclick = submitBudget;
+$("budget").style.cursor = "pointer";
+$("budget").title = "タップで編集";
+$("budget").onclick = openBudgetSheet;
+
 // 全支払い：固定費DBの有効な支払い ＋ 口座DBに支払日があるカード。カレンダー・直近予定で使用
 function allPaymentItems(){
   const cards = getCardAccounts()
@@ -1329,6 +1382,42 @@ function upcomingBills(){
     })
     .filter(b=>b.diff >= 0 && b.diff <= 14)
     .sort((a,b)=>a.diff-b.diff);
+}
+
+// ---- iOSカレンダーに登録（.ics）：毎月くり返し＋1日前アラート ----
+function icsEscape(s){ return String(s||"").replace(/([,;\\])/g,"\\$1").replace(/\r?\n/g,"\\n"); }
+function pad2(n){ return String(n).padStart(2,"0"); }
+function icsDownload(name, day, amount){
+  if(!day){ toast("支払日が未設定です", true); return; }
+  const now = new Date();
+  // 今月の該当日。過ぎていれば翌月から開始
+  let start = new Date(now.getFullYear(), now.getMonth(), day, 9, 0, 0);
+  if(start < now) start = new Date(now.getFullYear(), now.getMonth()+1, day, 9, 0, 0);
+  const dt = start.getFullYear()+pad2(start.getMonth()+1)+pad2(start.getDate())
+           +"T"+pad2(start.getHours())+pad2(start.getMinutes())+"00";
+  const stamp = new Date().toISOString().replace(/[-:]/g,"").slice(0,15)+"Z";
+  const uid = "lifelog-"+Date.now()+"-"+Math.random().toString(36).slice(2)+"@lifelog";
+  const title = "💳 "+name+" 支払日"+(amount?" ¥"+Number(amount).toLocaleString():"");
+  const ics = [
+    "BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//LIFE LOG//JP//","CALSCALE:GREGORIAN",
+    "BEGIN:VEVENT",
+    "UID:"+uid,
+    "DTSTAMP:"+stamp,
+    "DTSTART:"+dt,
+    "DURATION:PT30M",
+    "RRULE:FREQ=MONTHLY;BYMONTHDAY="+day,
+    "SUMMARY:"+icsEscape(title),
+    "BEGIN:VALARM","ACTION:DISPLAY","DESCRIPTION:"+icsEscape(title),"TRIGGER:-P1D","END:VALARM",
+    "END:VEVENT","END:VCALENDAR"
+  ].join("\r\n");
+  const blob = new Blob([ics], { type:"text/calendar;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name.replace(/[\\/:*?"<>|]/g,"") + "_支払日.ics";
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 1500);
+  toast("カレンダーファイルを作成しました");
 }
 
 function renderBills(c){
@@ -1363,6 +1452,7 @@ function renderBills(c){
         + '<div class="bill-sub">'+dayLabel+'</div>'
         + '<div class="bill-actions">'
         + '<button class="card-cfg-btn bill-edit" data-name="'+a.name+'" data-day="'+(a.day||0)+'">⚙️ '+(a.day?"支払日を編集":"支払日を設定")+'</button>'
+        + (a.day?'<button class="bill-ics" data-name="'+a.name+'" data-day="'+a.day+'" data-amount="0">📅 登録</button>':'')
         + '</div></div>'
         + '<div class="bill-right">'
         + '<div class="bill-day" style="color:var(--sub);font-size:11px">残高はNotionで管理</div>'
@@ -1384,6 +1474,7 @@ function renderBills(c){
         + '<div class="bill-sub">'+dayLabel+(b.account?" · "+b.account:"")+(b.memo?" · "+b.memo:"")+'</div>'
         + '<div class="bill-actions">'
         + '<button class="bill-edit" data-id="'+b.id+'">✏️ 編集</button>'
+        + (b.day?'<button class="bill-ics" data-name="'+(b.name||"").replace(/"/g,"&quot;")+'" data-day="'+b.day+'" data-amount="'+(b.amount||0)+'">📅</button>':'')
         + '<button class="bill-del" data-id="'+b.id+'">🗑</button>'
         + '</div></div>'
         + '<div class="bill-right">'
@@ -1412,6 +1503,9 @@ function renderBills(c){
   });
   c.querySelectorAll(".card-cfg-btn").forEach(btn=>{
     btn.onclick = ()=> openCardDaySheet(btn.dataset.name, parseInt(btn.dataset.day)||0);
+  });
+  c.querySelectorAll(".bill-ics").forEach(btn=>{
+    btn.onclick = (e)=>{ e.stopPropagation(); icsDownload(btn.dataset.name, parseInt(btn.dataset.day)||0, parseInt(btn.dataset.amount)||0); };
   });
 }
 
