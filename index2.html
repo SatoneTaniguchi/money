@@ -146,23 +146,18 @@
   @keyframes slideup{from{transform:translateY(100%)}to{transform:none}}
   @keyframes spin{to{transform:rotate(360deg)}}
 
-  /* ===== カテゴリピッカー ===== */
-  .cat-picker{display:none;flex-direction:column;gap:10px}
-  .cat-picker.open{display:flex}
-  .cat-group-label{font-size:10px;font-weight:700;letter-spacing:.12em;color:var(--sub);text-transform:uppercase;margin-bottom:2px;margin-top:4px}
-  .cat-group-label:first-child{margin-top:0}
-  .cat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
-  .cat-btn{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;
-    padding:10px 4px 8px;border:none;border-radius:12px;cursor:pointer;
-    font-family:inherit;font-size:11px;font-weight:500;line-height:1.2;
-    color:#fff;text-align:center;transition:transform .1s,box-shadow .1s;
-    min-height:62px;position:relative;overflow:hidden}
-  .cat-btn .icon{font-size:20px;line-height:1}
-  .cat-btn:active{transform:scale(.94)}
-  .cat-btn.selected{box-shadow:0 0 0 2.5px #fff,0 0 0 4.5px currentColor}
-  .cat-btn.selected::after{content:"✓";position:absolute;top:4px;right:6px;font-size:10px;font-weight:700;opacity:.9}
-  /* hidden select for form submission */
-  select.cat-hidden{display:none}
+  /* ===== カテゴリ カスタムセレクト ===== */
+  .cat-select-wrap{position:relative}
+  .cat-select-wrap select{
+    width:100%;background:#fff;border:none;border-radius:12px;
+    padding:12px 40px 12px 44px;font-size:14px;font-family:inherit;
+    outline:none;color:var(--ink);appearance:none;-webkit-appearance:none;
+    cursor:pointer;transition:box-shadow .15s}
+  .cat-select-wrap select:focus{box-shadow:0 0 0 2px var(--navy)}
+  .cat-select-wrap .arrow{position:absolute;right:14px;top:50%;transform:translateY(-50%);
+    pointer-events:none;color:var(--sub);font-size:12px}
+  .cat-dot{position:absolute;left:14px;top:50%;transform:translateY(-50%);
+    width:12px;height:12px;border-radius:50%;pointer-events:none;transition:background .15s}
 </style>
 </head>
 <body>
@@ -252,8 +247,11 @@
     <!-- カテゴリ（支出・収入のとき表示） -->
     <div class="mb" id="catWrap">
       <label class="fld">カテゴリ</label>
-      <select id="f-category" class="cat-hidden"></select>
-      <div class="cat-picker open" id="catPicker"></div>
+      <div class="cat-select-wrap">
+        <span class="cat-dot" id="catDot"></span>
+        <select id="f-category"></select>
+        <span class="arrow">▾</span>
+      </div>
     </div>
     <div class="mb" id="subWrap" style="display:none"><label class="fld">サブカテゴリ</label><select id="f-subcategory"></select></div>
 
@@ -494,90 +492,6 @@ async function renderBalances(c){
   }
 }
 
-// ---- カテゴリピッカー設定 ----
-// グループ・色・アイコンのマッピング
-const CAT_GROUPS = [
-  {
-    label: "日常生活",
-    color: "#e07b54",
-    cats: ["食費","日用雑貨","美容品","美容施術","衣服"],
-    icons: {"食費":"🍚","日用雑貨":"🧴","美容品":"💄","美容施術":"💅","衣服":"👗"}
-  },
-  {
-    label: "交流・楽しみ",
-    color: "#4a6fa5",
-    cats: ["交際費","エンタメ","サブスク"],
-    icons: {"交際費":"🥂","エンタメ":"🎬","サブスク":"📱"}
-  },
-  {
-    label: "自己投資・移動",
-    color: "#3f7d5c",
-    cats: ["教育・教養","交通"],
-    icons: {"教育・教養":"📚","交通":"🚃"}
-  },
-  {
-    label: "医療・保険・固定",
-    color: "#6a5a8c",
-    cats: ["医療・保険","固定費"],
-    icons: {"医療・保険":"💊","固定費":"🏠"}
-  },
-  {
-    label: "税金・特別・その他",
-    color: "#8c6a4a",
-    cats: ["税金","特別費","調節費用"],
-    icons: {"税金":"🏛️","特別費":"✨","調節費用":"⚖️"}
-  }
-];
-
-function buildCatPicker(availableCats, selectedValue){
-  const picker = $("catPicker");
-  const catSet = new Set(availableCats.map(c=>c.name));
-  let html = "";
-  CAT_GROUPS.forEach(group=>{
-    const available = group.cats.filter(c=>catSet.has(c));
-    if(!available.length) return;
-    html += '<div class="cat-group-label">'+group.label+'</div>';
-    html += '<div class="cat-grid">';
-    available.forEach(name=>{
-      const icon = group.icons[name] || "📌";
-      const sel = name === selectedValue ? " selected" : "";
-      // darken for readability: we use a slight gradient
-      html += '<button type="button" class="cat-btn'+sel+'" data-cat="'+name+'" '
-        + 'style="background:'+group.color+'">'
-        + '<span class="icon">'+icon+'</span>'
-        + '<span>'+name+'</span>'
-        + '</button>';
-    });
-    html += '</div>';
-  });
-  // any category not in any group → show at bottom
-  const grouped = new Set(CAT_GROUPS.flatMap(g=>g.cats));
-  const ungrouped = availableCats.filter(c=>!grouped.has(c.name));
-  if(ungrouped.length){
-    html += '<div class="cat-group-label">その他</div><div class="cat-grid">';
-    ungrouped.forEach(c=>{
-      const sel = c.name === selectedValue ? " selected" : "";
-      html += '<button type="button" class="cat-btn'+sel+'" data-cat="'+c.name+'" '
-        + 'style="background:#888">'
-        + '<span class="icon">📌</span>'
-        + '<span>'+c.name+'</span>'
-        + '</button>';
-    });
-    html += '</div>';
-  }
-  picker.innerHTML = html;
-  // bind clicks
-  picker.querySelectorAll(".cat-btn").forEach(btn=>{
-    btn.onclick = ()=>{
-      picker.querySelectorAll(".cat-btn").forEach(b=>b.classList.remove("selected"));
-      btn.classList.add("selected");
-      $("f-category").value = btn.dataset.cat;
-      refreshSubSelect(btn.dataset.cat);
-    };
-  });
-}
-
-
 // 口座を分類（タイプ）ごとにグループ化した <optgroup> を作る
 // カテゴリの表示順（似た項目を隣に）。ここに無い名前は末尾へ。
 const CATEGORY_ORDER = [
@@ -618,6 +532,53 @@ function buildSelects(){
   refreshCategorySelect(type);
   applyTypeUI(type);
 }
+// ---- カテゴリ カラー設定 ----
+const CAT_COLOR_MAP = {
+  "食費":"#e07b54","日用雑貨":"#e07b54","美容品":"#e07b54","美容施術":"#e07b54","衣服":"#e07b54",
+  "交際費":"#4a6fa5","エンタメ":"#4a6fa5","サブスク":"#4a6fa5",
+  "教育・教養":"#3f7d5c","交通":"#3f7d5c",
+  "医療・保険":"#6a5a8c","固定費":"#6a5a8c",
+  "税金":"#8c6a4a","特別費":"#8c6a4a","調節費用":"#8c6a4a",
+};
+const CAT_GROUPS_DEF = [
+  { label:"日常生活",      cats:["食費","日用雑貨","美容品","美容施術","衣服"],  color:"#e07b54" },
+  { label:"交流・楽しみ",  cats:["交際費","エンタメ","サブスク"],               color:"#4a6fa5" },
+  { label:"自己投資・移動",cats:["教育・教養","交通"],                           color:"#3f7d5c" },
+  { label:"医療・保険・固定",cats:["医療・保険","固定費"],                       color:"#6a5a8c" },
+  { label:"税金・特別・その他",cats:["税金","特別費","調節費用"],                color:"#8c6a4a" },
+];
+function catColor(name){ return CAT_COLOR_MAP[name] || "#888"; }
+
+function updateCatDot(val){
+  const dot = document.getElementById("catDot");
+  if(dot) dot.style.background = val ? catColor(val) : "transparent";
+}
+
+function groupedCategoryOptionsHTML(cats, selectedValue){
+  const catSet = new Set(cats.map(c=>c.name));
+  let html = '<option value=""'+(selectedValue?'':' selected')+'>（選択してください）</option>';
+  const grouped = new Set(CAT_GROUPS_DEF.flatMap(g=>g.cats));
+  CAT_GROUPS_DEF.forEach(group=>{
+    const available = group.cats.filter(c=>catSet.has(c));
+    if(!available.length) return;
+    html += '<optgroup label="── '+group.label+' ──">';
+    available.forEach(name=>{
+      html += '<option'+(name===selectedValue?' selected':'')+'>'+name+'</option>';
+    });
+    html += '</optgroup>';
+  });
+  // ungrouped fallback
+  const others = cats.filter(c=>!grouped.has(c.name));
+  if(others.length){
+    html += '<optgroup label="── その他 ──">';
+    others.forEach(c=>{
+      html += '<option'+(c.name===selectedValue?' selected':'')+'>'+c.name+'</option>';
+    });
+    html += '</optgroup>';
+  }
+  return html;
+}
+
 function refreshCategorySelect(type){
   const catSel = $("f-category");
   // 収入なら収入カテゴリ、支出なら支出系（移動/NMD/調節費用は対象外）
@@ -628,8 +589,8 @@ function refreshCategorySelect(type){
     return k.includes("支出") || k.includes("固定費");
   });
   const sorted = sortCats(cats);
-  catSel.innerHTML = sorted.map(c=>'<option>'+c.name+'</option>').join("");
-  buildCatPicker(sorted, catSel.value);
+  catSel.innerHTML = groupedCategoryOptionsHTML(sorted, catSel.value);
+  updateCatDot(catSel.value);
   refreshSubSelect(catSel.value);
 }
 // サブカテゴリ（親に応じて中身を出す。無ければ欄を隠す）
@@ -796,11 +757,7 @@ function openEditSheet(t){
   $("f-memo").value = t.memo || "";
   if(t.category){
     $("f-category").value = t.category;
-    // ピッカーの選択状態を同期
-    const picker = $("catPicker");
-    picker.querySelectorAll(".cat-btn").forEach(b=>{
-      b.classList.toggle("selected", b.dataset.cat === t.category);
-    });
+    updateCatDot(t.category);
   }
   refreshSubSelect($("f-category").value, t.subcategory || "");
   // 口座は「有効な口座名のときだけ」選択。未設定・不明なら（選択なし）に戻す
@@ -841,7 +798,7 @@ $("sheetClose").onclick = closeSheet;
 $("overlay").onclick = closeSheet;
 $("submitBtn").onclick = submitTx;
 $("f-date").onchange = updateMonthHint;
-$("f-category").onchange = ()=> refreshSubSelect($("f-category").value);
+$("f-category").onchange = ()=>{ updateCatDot($("f-category").value); refreshSubSelect($("f-category").value); };
 document.querySelectorAll("#typeSeg button").forEach(b=>{
   b.onclick = ()=> setType(b.dataset.type);
 });
