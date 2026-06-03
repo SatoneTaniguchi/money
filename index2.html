@@ -221,6 +221,51 @@
   .bill-enable{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--sub);margin:6px 2px 2px;cursor:pointer}
   .bill-enable input{width:auto;accent-color:var(--navy)}
   .bill-card.bill-off{opacity:.5}
+
+  /* ── 取込記録 ── */
+  .ilog-wrap{padding:4px 0 24px}
+  .ilog-add-btn{width:100%;padding:12px;border:2px dashed rgba(58,74,99,.3);border-radius:14px;
+    background:none;color:var(--navy);font-family:inherit;font-size:14px;cursor:pointer;margin-bottom:16px}
+  .ilog-add-btn:active{background:rgba(58,74,99,.06)}
+  .ilog-card{background:var(--card);border-radius:16px;padding:14px 16px;margin-bottom:10px;
+    box-shadow:0 1px 4px rgba(0,0,0,.06);position:relative}
+  .ilog-card-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+  .ilog-source{font-weight:700;font-size:15px;color:var(--navy)}
+  .ilog-period{font-size:12px;color:var(--sub);margin-top:2px}
+  .ilog-memo{font-size:13px;color:var(--ink);margin-top:6px;white-space:pre-wrap;word-break:break-all}
+  .ilog-del{background:none;border:none;font-size:16px;color:var(--sub);cursor:pointer;padding:2px 4px;line-height:1}
+  .ilog-empty{text-align:center;color:var(--sub);font-size:14px;padding:40px 0}
+  .ilog-filter-bar{background:var(--card);border-radius:14px;padding:12px 14px;margin-bottom:12px;
+    display:flex;flex-direction:column;gap:8px;box-shadow:0 1px 4px rgba(0,0,0,.05)}
+  .ilog-filter-row{display:flex;align-items:center;gap:6px}
+  .ilog-filter-input{width:100%;padding:8px 12px;border:1.5px solid #e0dbd3;border-radius:10px;
+    font-family:inherit;font-size:13px;background:#fafaf8;color:var(--ink)}
+  .ilog-filter-date{flex:1;padding:8px 10px;border:1.5px solid #e0dbd3;border-radius:10px;
+    font-family:inherit;font-size:13px;background:#fafaf8;color:var(--ink);min-width:0}
+  .ilog-filter-clear{background:none;border:none;color:var(--red);font-size:13px;font-family:inherit;
+    cursor:pointer;padding:0 4px;white-space:nowrap;flex-shrink:0}
+  .ilog-count{font-size:12px;color:var(--sub);margin-bottom:8px;padding-left:2px}
+  .ilog-pending{opacity:.7;border-left:3px solid var(--sub)}
+  .ilog-badge-pending{display:inline-block;font-size:10px;background:#e8e2d6;color:var(--sub);
+    border-radius:6px;padding:1px 6px;margin-left:6px;vertical-align:middle}
+  /* 取込記録モーダル */
+  .ilog-modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:200;
+    align-items:flex-end;justify-content:center}
+  .ilog-modal-overlay.open{display:flex}
+  .ilog-modal{background:var(--bg);border-radius:24px 24px 0 0;padding:24px 20px 40px;width:100%;max-width:440px}
+  .ilog-modal h3{margin:0 0 16px;font-size:17px;color:var(--navy)}
+  .ilog-modal input,.ilog-modal textarea{width:100%;padding:10px 12px;border:1.5px solid #ddd;border-radius:10px;
+    font-family:inherit;font-size:14px;background:#fff;color:var(--ink);box-sizing:border-box}
+  .ilog-modal textarea{height:72px;resize:none}
+  .ilog-modal .fld{margin-bottom:12px}
+  .ilog-date-row{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:6px;margin-bottom:12px}
+  .ilog-date-row span{text-align:center;color:var(--sub);font-size:13px}
+  .ilog-modal-btns{display:flex;gap:10px;margin-top:4px}
+  .ilog-modal-btns button{flex:1;padding:13px;border:none;border-radius:12px;font-family:inherit;
+    font-size:15px;font-weight:700;cursor:pointer}
+  .ilog-btn-cancel{background:#e8e2d6;color:var(--ink)}
+  .ilog-btn-save{background:var(--navy);color:#fff}
+
 </style>
 </head>
 <body>
@@ -268,10 +313,38 @@
     <button data-tab="bills">💳</button>
     <button data-tab="account">口座</button>
     <button data-tab="balance">残高</button>
+    <button data-tab="importlog">📥</button>
   </div>
 
   <div id="content" class="list">
     <div class="loading"><span class="spin"></span>読み込み中…</div>
+  </div>
+</div>
+
+
+<!-- 取込記録モーダル -->
+<div class="ilog-modal-overlay" id="ilogOverlay">
+  <div class="ilog-modal">
+    <h3 id="ilogModalTitle">取込記録を追加</h3>
+    <div class="fld"><label class="fld">口座 / サービス名</label>
+      <input type="text" id="ilogSource" placeholder="例: PayPay、楽天銀行、イオンカード">
+    </div>
+    <div class="ilog-date-row">
+      <div><label class="fld">開始日</label>
+        <input type="date" id="ilogFrom">
+      </div>
+      <span>〜</span>
+      <div><label class="fld">終了日</label>
+        <input type="date" id="ilogTo">
+      </div>
+    </div>
+    <div class="fld"><label class="fld">メモ（任意）</label>
+      <textarea id="ilogMemo" placeholder="例: スクショ10枚、PDF取込済み、残り未確認など"></textarea>
+    </div>
+    <div class="ilog-modal-btns">
+      <button class="ilog-btn-cancel" onclick="closeIlogModal()">キャンセル</button>
+      <button class="ilog-btn-save" onclick="saveIlogEntry()">保存</button>
+    </div>
   </div>
 </div>
 
@@ -568,6 +641,10 @@ function renderTab(){
 
   else if(state.tab === "balance"){
     renderBalances(c);
+  }
+  else if(state.tab === "importlog"){
+    renderImportLog();
+    return;
   }
   else if(state.tab === "calendar"){
     renderCalendar(c);
@@ -1061,6 +1138,10 @@ async function startScan(files){
       row._on = !isDup;   // 重複は既定でオフ
     });
     scanRows = rows;
+
+    // AI解析結果から取込記録を自動生成
+    autoAddIlogFromScan(rows);
+
     renderReview();
   }catch(e){
     $("reviewList").innerHTML = '<div class="empty">読み込みに失敗しました<br>'+e.message+'</div>';
@@ -1160,6 +1241,7 @@ async function submitScan(){
     }catch(e){ ng++; }
   }
   $("reviewOverlay").style.display = "none";
+  finalizeIlogFromScan(targets);
   scanRows = [];
   toast(ng ? (ok+"件追加・"+ng+"件失敗") : (ok+"件を追加しました"), ng>0);
   await loadSummary();
@@ -1174,6 +1256,177 @@ $("scanInput").onchange = (e)=>{ startScan(e.target.files); e.target.value = "";
 $("reviewClose").onclick = closeReview;
 $("reviewOverlay").onclick = closeReview;
 $("reviewSubmit").onclick = submitScan;
+
+
+// ── 取込記録 ──
+let ilogEditId = null;
+let ilogFilter = { source: '', dateFrom: '', dateTo: '' };
+
+function getIlogEntries(){
+  try{ return JSON.parse(localStorage.getItem('moneylog_importlog')||'[]'); }
+  catch(e){ return []; }
+}
+function saveIlogEntries(arr){
+  localStorage.setItem('moneylog_importlog', JSON.stringify(arr));
+}
+
+// AI解析完了時に仮エントリを自動追加（口座はsubmit時確定）
+function autoAddIlogFromScan(rows){
+  if(!rows || !rows.length) return;
+  const dates = rows.map(r=>r.date).filter(Boolean).sort();
+  const entry = {
+    id: 'scan_' + Date.now(),
+    source: '',
+    from: dates[0] || '',
+    to: dates[dates.length-1] || '',
+    memo: '',
+    savedAt: new Date().toISOString(),
+    _pending: true
+  };
+  const entries = getIlogEntries();
+  entries.push(entry);
+  saveIlogEntries(entries);
+}
+
+// submitScan完了後、仮エントリに口座名を付けて確定
+function finalizeIlogFromScan(targets){
+  if(!targets || !targets.length) return;
+  const accounts = [...new Set(targets.map(r=>r.account).filter(Boolean))];
+  const source = accounts.length ? accounts.join('・') : '（口座未選択）';
+  const entries = getIlogEntries();
+  for(let i = entries.length-1; i >= 0; i--){
+    if(entries[i]._pending){
+      entries[i].source = source;
+      delete entries[i]._pending;
+      break;
+    }
+  }
+  saveIlogEntries(entries);
+  if(state.tab === 'importlog') renderImportLog();
+}
+
+function renderImportLog(){
+  const c = $('content');
+  const allEntries = getIlogEntries().slice().reverse();
+
+  const filtered = allEntries.filter(e => {
+    if(ilogFilter.source && !(e.source||'').includes(ilogFilter.source)) return false;
+    if(ilogFilter.dateFrom && e.to && e.to < ilogFilter.dateFrom) return false;
+    if(ilogFilter.dateTo && e.from && e.from > ilogFilter.dateTo) return false;
+    return true;
+  });
+
+  const filterActive = ilogFilter.source || ilogFilter.dateFrom || ilogFilter.dateTo;
+  let html = '<div class="ilog-wrap">';
+  html += '<button class="ilog-add-btn" onclick="openIlogModal()">＋ 取込記録を手動追加</button>';
+
+  html += `<div class="ilog-filter-bar">
+    <div class="ilog-filter-row">
+      <input type="text" class="ilog-filter-input" id="ilogFilterSource"
+        placeholder="🔍 口座・サービス名で絞り込み"
+        value="${ilogFilter.source}"
+        oninput="ilogFilter.source=this.value;renderImportLog()">
+    </div>
+    <div class="ilog-filter-row">
+      <input type="date" class="ilog-filter-date"
+        value="${ilogFilter.dateFrom}"
+        onchange="ilogFilter.dateFrom=this.value;renderImportLog()">
+      <span style="color:var(--sub);font-size:13px;flex-shrink:0">〜</span>
+      <input type="date" class="ilog-filter-date"
+        value="${ilogFilter.dateTo}"
+        onchange="ilogFilter.dateTo=this.value;renderImportLog()">
+      ${filterActive ? '<button class="ilog-filter-clear" onclick="ilogClearFilter()">✕ クリア</button>' : ''}
+    </div>
+  </div>`;
+
+  html += `<div class="ilog-count">${filterActive ? filtered.length + ' / ' + allEntries.length : allEntries.length} 件</div>`;
+
+  if(filtered.length === 0){
+    html += '<div class="ilog-empty">' + (filterActive ? '条件に一致する記録がありません' : '取込記録がありません<br><span style="font-size:12px">📷ボタンで読み込むと自動記録されます</span>') + '</div>';
+  } else {
+    filtered.forEach(e => {
+      const period = e.from && e.to ? e.from + ' 〜 ' + e.to
+                   : e.from ? e.from + ' 〜' : e.to ? '〜 ' + e.to : '';
+      const pendingBadge = e._pending ? '<span class="ilog-badge-pending">確認中</span>' : '';
+      html += `<div class="ilog-card${e._pending?' ilog-pending':''}">
+        <div class="ilog-card-head">
+          <div>
+            <div class="ilog-source">${e.source || '（口座未確定）'}${pendingBadge}</div>
+            ${period ? `<div class="ilog-period">📅 ${period}</div>` : ''}
+          </div>
+          <div style="display:flex;gap:4px">
+            <button class="ilog-del" onclick="editIlogEntry('${e.id}')" title="編集">✏️</button>
+            <button class="ilog-del" onclick="deleteIlogEntry('${e.id}')" title="削除">🗑️</button>
+          </div>
+        </div>
+        ${e.memo ? `<div class="ilog-memo">${e.memo}</div>` : ''}
+      </div>`;
+    });
+  }
+  html += '</div>';
+  c.innerHTML = html;
+}
+
+function ilogClearFilter(){
+  ilogFilter = { source:'', dateFrom:'', dateTo:'' };
+  renderImportLog();
+}
+
+function openIlogModal(id){
+  ilogEditId = id || null;
+  $('ilogModalTitle').textContent = id ? '取込記録を編集' : '取込記録を追加';
+  if(id){
+    const e = getIlogEntries().find(x=>x.id===id);
+    if(e){
+      $('ilogSource').value = e.source || '';
+      $('ilogFrom').value = e.from || '';
+      $('ilogTo').value = e.to || '';
+      $('ilogMemo').value = e.memo || '';
+    }
+  } else {
+    $('ilogSource').value=''; $('ilogFrom').value=''; $('ilogTo').value=''; $('ilogMemo').value='';
+  }
+  $('ilogOverlay').classList.add('open');
+  setTimeout(()=>$('ilogSource').focus(), 100);
+}
+
+function closeIlogModal(){
+  $('ilogOverlay').classList.remove('open');
+}
+
+function saveIlogEntry(){
+  const source = $('ilogSource').value.trim();
+  if(!source){ $('ilogSource').focus(); return; }
+  const entry = {
+    id: ilogEditId || Date.now().toString(),
+    source,
+    from: $('ilogFrom').value,
+    to: $('ilogTo').value,
+    memo: $('ilogMemo').value.trim(),
+    savedAt: new Date().toISOString()
+  };
+  let entries = getIlogEntries();
+  if(ilogEditId){ entries = entries.map(e => e.id===ilogEditId ? entry : e); }
+  else { entries.push(entry); }
+  saveIlogEntries(entries);
+  closeIlogModal();
+  if(state.tab === 'importlog') renderImportLog();
+  toast(ilogEditId ? '記録を更新しました' : '記録を追加しました');
+}
+
+function editIlogEntry(id){ openIlogModal(id); }
+
+function deleteIlogEntry(id){
+  if(!confirm('この記録を削除しますか？')) return;
+  saveIlogEntries(getIlogEntries().filter(e=>e.id!==id));
+  renderImportLog();
+  toast('削除しました');
+}
+
+document.addEventListener('DOMContentLoaded', ()=>{
+  const ov = $('ilogOverlay');
+  if(ov) ov.addEventListener('click', e=>{ if(e.target===ov) closeIlogModal(); });
+});
 
 // ---- 起動 ----
 (async()=>{ checkPayday(); await loadOptions(); await loadBills(); await loadSummary(); })();
