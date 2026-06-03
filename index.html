@@ -161,6 +161,7 @@
     <button data-tab="category" class="on">カテゴリ</button>
     <button data-tab="list">取引</button>
     <button data-tab="account">口座</button>
+    <button data-tab="balance">残高</button>
   </div>
 
   <div id="content" class="list">
@@ -178,14 +179,19 @@
     <div class="seg" id="typeSeg">
       <button data-type="expense" class="on">支出</button>
       <button data-type="income">収入</button>
+      <button data-type="move">移動</button>
     </div>
     <label class="fld">金額</label>
     <input class="amount mb" id="f-amount" type="number" inputmode="numeric" placeholder="0" />
-    <div class="grid2">
-      <div><label class="fld">日付</label><input id="f-date" type="date" /></div>
-      <div><label class="fld">口座</label><select id="f-account"></select></div>
-    </div>
-    <div class="mb"><label class="fld">カテゴリ</label><select id="f-category"></select></div>
+    <div class="mb"><label class="fld">日付</label><input id="f-date" type="date" /></div>
+
+    <!-- カテゴリ（支出・収入のとき表示） -->
+    <div class="mb" id="catWrap"><label class="fld">カテゴリ</label><select id="f-category"></select></div>
+
+    <!-- 口座：支出=出金元 / 収入=入金先 / 移動=両方 -->
+    <div class="mb" id="accOutWrap"><label class="fld" id="accOutLabel">口座（出金元）</label><select id="f-accountOut"></select></div>
+    <div class="mb" id="accInWrap" style="display:none"><label class="fld" id="accInLabel">口座（入金先）</label><select id="f-accountIn"></select></div>
+
     <div class="mb"><label class="fld">メモ</label><input id="f-memo" placeholder="任意" /></div>
     <div class="hint" id="monthHint"></div>
     <button class="submit" id="submitBtn">追加する</button>
@@ -227,7 +233,9 @@ function toast(msg, isErr){
 }
 
 // ---- ローカルで集計を再計算（Notionの確定を待たず即反映するため）----
-function classifyLocal(kind){
+function classifyLocal(kind, category){
+  // 調節費用は支出に含めない
+  if(category === "調節費用") return "ignore";
   const k = (kind||"").replace(/\s/g,"");
   if(k.includes("固定費")) return "fixed";
   if(k.includes("収入")) return "income";
@@ -244,7 +252,7 @@ function recomputeSummary(){
   state.options.categories.forEach(c=> kindOf[c.name] = c.kind);
   for(const t of s.transactions){
     const kind = t.kind || kindOf[t.category] || "";
-    const bucket = classifyLocal(kind);
+    const bucket = classifyLocal(kind, t.category);
     if(bucket==="income") income += t.amount;
     else if(bucket==="fixed") fixedExpense += t.amount;
     else if(bucket==="variable") variableExpense += t.amount;
@@ -379,56 +387,139 @@ function renderTab(){
       + (v.in>0 ? '<div style="color:var(--green);font-size:11px">収入 '+yen(v.in)+'</div>' : '')
       + '</div></div>').join("");
   }
+
+  else if(state.tab === "balance"){
+    renderBalances(c);
+  }
+}
+
+// 口座残高（全期間・タイプ別にグループ表示）
+async function renderBalances(c){
+  c.innerHTML = '<div class="loading"><span class="spin"></span>残高を計算中…</div>';
+  try{
+    const r = await fetch(API + "/balances?t=" + Date.now());
+    const d = await r.json();
+    if(!d.ok) throw new Error(d.error || "balances error");
+    const typeOf = {}; state.options.accounts.forEach(a=> typeOf[a.name]=a.type||"その他");
+    // タイプ別にまとめる
+    const groups = {};
+    Object.entries(d.balances).forEach(([name,v])=>{
+      const t = v.type || typeOf[name] || "その他";
+      (groups[t]=groups[t]||[]).push({name, balance:v.balance});
+    });
+    const order = [...TYPE_ORDER.filter(t=>groups[t]), ...Object.keys(groups).filter(t=>!TYPE_ORDER.includes(t))];
+    let html = "";
+    order.forEach(t=>{
+      const sum = groups[t].reduce((a,b)=>a+b.balance,0);
+      html += '<div style="margin:8px 4px 4px;font-size:12px;color:var(--sub);display:flex;justify-content:space-between">'
+        + '<span>'+t+'</span><span class="tabular">'+yen(sum)+'</span></div>';
+      groups[t].sort((a,b)=>b.balance-a.balance).forEach(a=>{
+        const neg = a.balance < 0;
+        html += '<div class="txrow"><div class="m">'+a.name+'</div>'
+          + '<div class="a tabular" style="color:'+(neg?"var(--red)":"var(--ink)")+'">'+yen(a.balance)+'</div></div>';
+      });
+    });
+    c.innerHTML = html || '<div class="empty">口座がありません</div>';
+  }catch(e){
+    c.innerHTML = '<div class="empty">残高の取得に失敗しました<br>'+e.message+'</div>';
+  }
 }
 
 // ---- プルダウン生成 ----
+// 口座を分類（タイプ）ごとにグループ化した <optgroup> を作る
+const TYPE_ORDER = ["銀行","カード系列","証券口座","電子決済","現金","非通常用途","その他"];
+function accountOptionsHTML(){
+  const accs = state.options.accounts; // [{name, type}]
+  const groups = {};
+  accs.forEach(a=>{ const t=a.type||"その他"; (groups[t]=groups[t]||[]).push(a.name); });
+  const order = [...TYPE_ORDER.filter(t=>groups[t]), ...Object.keys(groups).filter(t=>!TYPE_ORDER.includes(t))];
+  return order.map(t=>
+    '<optgroup label="'+t+'">' + groups[t].map(n=>'<option>'+n+'</option>').join("") + '</optgroup>'
+  ).join("");
+}
 function buildSelects(){
   const type = document.querySelector("#typeSeg .on").dataset.type;
-  const accSel = $("f-account");
-  accSel.innerHTML = state.options.accounts.map(a=>'<option>'+a+'</option>').join("");
+  const html = accountOptionsHTML();
+  $("f-accountOut").innerHTML = html;
+  $("f-accountIn").innerHTML = html;
   refreshCategorySelect(type);
+  applyTypeUI(type);
 }
 function refreshCategorySelect(type){
   const catSel = $("f-category");
-  // 収入タブなら収入カテゴリ、支出タブならそれ以外（移動/NMD除く）
+  // 収入なら収入カテゴリ、支出なら支出系（移動/NMD/調節費用は対象外）
   const cats = state.options.categories.filter(c=>{
     const k = (c.kind||"").replace(/\s/g,"");
     if(type==="income") return k.includes("収入");
+    if(type==="move") return false;
     return k.includes("支出") || k.includes("固定費");
   });
   catSel.innerHTML = cats.map(c=>'<option>'+c.name+'</option>').join("");
+}
+// モードに応じて表示するフィールドを切り替える
+function applyTypeUI(type){
+  const isMove = type==="move";
+  $("catWrap").style.display = isMove ? "none" : "block";
+  $("accInWrap").style.display = isMove ? "block" : "none";
+  if(type==="income"){
+    $("accOutLabel").textContent = "口座（入金先）";
+  }else if(isMove){
+    $("accOutLabel").textContent = "口座（出金元）";
+    $("accInLabel").textContent  = "口座（入金先）";
+  }else{
+    $("accOutLabel").textContent = "口座（出金元）";
+  }
 }
 
 // ---- 追加 / 編集（共通） ----
 let editingId = null;  // null=追加モード, 値あり=編集モード
 
 async function submitTx(){
+  const type = document.querySelector("#typeSeg .on").dataset.type; // expense/income/move
   const amount = parseInt($("f-amount").value,10);
   const date = $("f-date").value;
-  const category = $("f-category").value;
-  const account = $("f-account").value;
   const memo = $("f-memo").value;
   if(!amount || amount<=0){ toast("金額を入力してください", true); return; }
   if(!date){ toast("日付を選んでください", true); return; }
-  if(!category){ toast("カテゴリを選んでください", true); return; }
+
+  // モード別に、カテゴリ・出金先・入金先を決める
+  let category, accountOut=null, accountIn=null;
+  if(type==="move"){
+    accountOut = $("f-accountOut").value;
+    accountIn  = $("f-accountIn").value;
+    if(!accountOut || !accountIn){ toast("出金元と入金先を選んでください", true); return; }
+    if(accountOut === accountIn){ toast("出金元と入金先が同じです", true); return; }
+    // 移動用カテゴリを自動選択（「お金移動」を優先、無ければ移動種別の先頭）
+    const moveCat = state.options.categories.find(c=>c.name==="お金移動")
+                 || state.options.categories.find(c=>(c.kind||"").replace(/\s/g,"").includes("移動"));
+    if(!moveCat){ toast("移動用カテゴリ（お金移動）が見つかりません", true); return; }
+    category = moveCat.name;
+  }else{
+    category = $("f-category").value;
+    if(!category){ toast("カテゴリを選んでください", true); return; }
+    if(type==="income"){ accountIn = $("f-accountOut").value; }  // 収入は「口座（入金先）」をf-accountOutに表示
+    else { accountOut = $("f-accountOut").value; }
+  }
 
   const isEdit = !!editingId;
   const kindOf = {}; state.options.categories.forEach(c=> kindOf[c.name]=c.kind);
   const kind = kindOf[category] || "";
   const txMonth = fiscalMonthOf(date);
   const editId = editingId;
+  const accountForView = accountOut || accountIn || "";
 
   // --- 画面を即反映（楽観的更新）---
   closeSheet();
   if(txMonth === state.month){
     const s = state.summary;
     if(s){
+      const row = { id: isEdit?editId:("temp-"+Date.now()), date, amount, category, kind, account: accountForView, memo };
+      if(!isEdit) row._pending = true;
       if(isEdit){
         const idx = s.transactions.findIndex(t=>t.id===editId);
-        if(idx>=0) s.transactions[idx] = { id:editId, date, amount, category, kind, account, memo };
+        if(idx>=0) s.transactions[idx] = row;
       }else{
-        // 仮IDで先に表示（保存後に本IDへ差し替え）
-        s.transactions.push({ id:"temp-"+Date.now(), date, amount, category, kind, account, memo, _pending:true });
+        s.transactions.push(row);
       }
       s.transactions.sort((a,b)=> (b.date||"").localeCompare(a.date||""));
       recomputeSummary();
@@ -438,7 +529,9 @@ async function submitTx(){
 
   // --- 裏でNotionに保存 ---
   try{
-    const body = { date, amount, category, account, memo };
+    const body = { date, amount, category, memo };
+    if(accountOut) body.accountOut = accountOut;
+    if(accountIn)  body.accountIn  = accountIn;
     if(isEdit) body.id = editId;
     const r = await fetch(API + (isEdit ? "/update" : "/add"), {
       method:"POST", headers:{"Content-Type":"application/json"},
@@ -447,11 +540,9 @@ async function submitTx(){
     const d = await r.json();
     if(!d.ok) throw new Error(d.error || "error");
     toast(isEdit ? "更新しました" : "追加しました");
-    // 追加なら、表示中の月が対象月と違えばその月へ移動して取り直し
     if(!isEdit && d.month !== state.month){
       state.month = d.month; await loadSummary();
     }else{
-      // 仮IDを本IDに静かに差し替え（次回操作のため）
       if(!isEdit && state.summary){
         const tmp = state.summary.transactions.find(t=>t._pending);
         if(tmp){ tmp.id = d.id; delete tmp._pending; }
@@ -459,7 +550,7 @@ async function submitTx(){
     }
   }catch(e){
     toast((isEdit?"更新":"追加")+"に失敗しました。再読み込みします", true);
-    await loadSummary();   // 失敗したらサーバーの正しい状態に戻す
+    await loadSummary();
   }
 }
 
@@ -467,6 +558,7 @@ async function submitTx(){
 function setType(type){
   document.querySelectorAll("#typeSeg button").forEach(x=>x.classList.toggle("on", x.dataset.type===type));
   refreshCategorySelect(type);
+  applyTypeUI(type);
 }
 
 // 新規追加で開く
@@ -487,14 +579,15 @@ function openEditSheet(t){
   editingId = t.id;
   $("sheetTitle").innerHTML = '取引を編集 <button class="x" id="sheetClose">✕</button>';
   $("submitBtn").textContent = "更新する";
-  const type = (t.kind||"").includes("収入") ? "income" : "expense";
+  const k = (t.kind||"").replace(/\s/g,"");
+  // 移動の編集は出金/入金の元データが片方しか無いため、支出/収入として開く
+  const type = k.includes("収入") ? "income" : "expense";
   setType(type);
   $("f-date").value = t.date ? t.date.slice(0,10) : new Date().toISOString().slice(0,10);
   $("f-amount").value = t.amount || "";
   $("f-memo").value = t.memo || "";
-  // カテゴリ・口座は候補を作った後に選択
   if(t.category) $("f-category").value = t.category;
-  if(t.account) $("f-account").value = t.account;
+  if(t.account) $("f-accountOut").value = t.account;
   updateMonthHint();
   bindSheetClose();
   $("overlay").style.display = "flex";
