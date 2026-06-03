@@ -114,6 +114,34 @@
   .loading{text-align:center;color:var(--sub);font-size:13px;padding:24px}
   .spin{display:inline-block;width:16px;height:16px;border:2px solid var(--sub);border-top-color:transparent;border-radius:50%;animation:spin .7s linear infinite;vertical-align:-3px;margin-right:6px}
 
+  /* スキャン（スクショ/PDF読込） */
+  .fab.scan{bottom:90px;width:48px;height:48px;font-size:20px;background:var(--green);
+    box-shadow:0 6px 16px rgba(63,125,92,.4)}
+  .fab.scan:active{transform:translateX(calc(220px - 50% - 8px)) scale(.94)}
+  @media(max-width:456px){
+    .fab.scan{left:auto;right:28px;bottom:90px;transform:none}
+    .fab.scan:active{transform:scale(.94)}
+  }
+
+  .sheet.review{max-height:90vh;display:flex;flex-direction:column}
+  .review-scroll{overflow-y:auto;-webkit-overflow-scrolling:touch;margin:0 -4px;padding:0 4px}
+  .review-head{font-size:12px;color:var(--sub);margin-bottom:12px}
+  .bulk-acc{margin-bottom:12px}
+  .rrow{background:var(--card);border-radius:14px;padding:12px;margin-bottom:10px;position:relative}
+  .rrow.off{opacity:.45}
+  .rrow.dup{box-shadow:0 0 0 1.5px var(--over) inset}
+  .rrow .rtop{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+  .rrow .rchk{width:20px;height:20px;flex-shrink:0;accent-color:var(--navy)}
+  .rrow .rname{flex:1;min-width:0;font-size:14px;font-weight:700;padding:6px 8px;border-radius:8px}
+  .badge{font-size:10px;font-weight:700;padding:2px 7px;border-radius:99px;flex-shrink:0}
+  .badge.dup{background:var(--over);color:#fff}
+  .rgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .rgrid input,.rgrid select{padding:8px;font-size:13px;border-radius:8px}
+  .rgrid .ramount{font-family:'Shippori Mincho B1',serif;font-size:16px}
+  .rgrid .full{grid-column:1 / -1}
+  .review-foot{padding-top:12px}
+  .scanload{text-align:center;color:var(--sub);font-size:13px;padding:40px 0}
+
   @keyframes rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
   @keyframes slideup{from{transform:translateY(100%)}to{transform:none}}
   @keyframes spin{to{transform:rotate(360deg)}}
@@ -169,8 +197,26 @@
   </div>
 </div>
 
+<button class="fab scan" id="scanFab" title="スクショ/PDFから読込">📷</button>
 <button class="fab" id="fab">＋</button>
+<input type="file" id="scanInput" accept="image/*,application/pdf" multiple style="display:none" />
 <div id="toast" class="toast"></div>
+
+<!-- 読み込み結果の確認・編集シート -->
+<div class="overlay" id="reviewOverlay" style="display:none">
+  <div class="sheet review" onclick="event.stopPropagation()">
+    <h2>読み込み結果の確認 <button class="x" id="reviewClose">✕</button></h2>
+    <div class="review-head" id="reviewHead"></div>
+    <div class="bulk-acc" id="bulkAccWrap" style="display:none">
+      <label class="fld">この明細の口座（まとめて設定）</label>
+      <select id="bulkAcc"></select>
+    </div>
+    <div class="review-scroll" id="reviewList"></div>
+    <div class="review-foot">
+      <button class="submit" id="reviewSubmit">選択した取引を追加</button>
+    </div>
+  </div>
+</div>
 
 <!-- 入力シート -->
 <div class="overlay" id="overlay" style="display:none">
@@ -433,9 +479,12 @@ function accountOptionsHTML(){
   const groups = {};
   accs.forEach(a=>{ const t=a.type||"その他"; (groups[t]=groups[t]||[]).push(a.name); });
   const order = [...TYPE_ORDER.filter(t=>groups[t]), ...Object.keys(groups).filter(t=>!TYPE_ORDER.includes(t))];
-  return order.map(t=>
+  // 先頭に「選択なし」（未設定）を入れる
+  let html = '<option value="">（選択なし）</option>';
+  html += order.map(t=>
     '<optgroup label="'+t+'">' + groups[t].map(n=>'<option>'+n+'</option>').join("") + '</optgroup>'
   ).join("");
+  return html;
 }
 function buildSelects(){
   const type = document.querySelector("#typeSeg .on").dataset.type;
@@ -554,6 +603,15 @@ async function submitTx(){
   }
 }
 
+// 口座セレクトに値をセット。options に存在する有効な口座名のときだけ選択し、
+// 未設定（空）や一覧に無い名前のときは必ず「（選択なし）」に戻す。
+function selectAccountValue(sel, name){
+  sel.value = "";                      // まず必ず未設定に戻す（前回の選択を残さない）
+  if(!name) return;
+  const ok = (state.options.accounts || []).some(a => a.name === name);
+  if(ok) sel.value = name;             // 有効な口座だけ選択
+}
+
 // ---- シート開閉 ----
 function setType(type){
   document.querySelectorAll("#typeSeg button").forEach(x=>x.classList.toggle("on", x.dataset.type===type));
@@ -569,6 +627,9 @@ function openSheet(){
   setType("expense");
   $("f-date").value = new Date().toISOString().slice(0,10);
   $("f-amount").value = ""; $("f-memo").value = "";
+  // 口座は毎回「（選択なし）」から開始（前回の選択を残さない）
+  selectAccountValue($("f-accountOut"), "");
+  selectAccountValue($("f-accountIn"), "");
   updateMonthHint();
   bindSheetClose();
   $("overlay").style.display = "flex";
@@ -587,7 +648,10 @@ function openEditSheet(t){
   $("f-amount").value = t.amount || "";
   $("f-memo").value = t.memo || "";
   if(t.category) $("f-category").value = t.category;
-  if(t.account) $("f-accountOut").value = t.account;
+  // 口座は「有効な口座名のときだけ」選択。未設定・不明なら（選択なし）に戻す
+  // （セレクトは使い回しのため、前回の編集で選んだ口座が残らないよう必ずリセット）
+  selectAccountValue($("f-accountOut"), t.account);
+  selectAccountValue($("f-accountIn"), "");
   updateMonthHint();
   bindSheetClose();
   $("overlay").style.display = "flex";
@@ -662,6 +726,206 @@ function checkPayday(){
   }
 }
 $("paydayClose").onclick = ()=>{ $("payday").style.display = "none"; };
+
+// ============================================================
+//  スクショ/PDF 読み込み → 確認・編集 → 一括追加
+// ============================================================
+let scanRows = [];   // 解析結果（編集対象）
+
+// 重複判定キー：日付|金額|名前（全角半角・空白を無視）
+function normKey(s){ return (s||"").toLowerCase().replace(/[\s　]/g,"").replace(/（/g,"(").replace(/）/g,")"); }
+function dupKey(date, amount, name){
+  return (date||"").slice(0,10) + "|" + Math.abs(Math.round(Number(amount)||0)) + "|" + normKey(name);
+}
+
+// 既存取引のキー集合を、対象の会計月ぶんだけ集める
+async function existingKeySet(rows){
+  const months = [...new Set(rows.map(r=>fiscalMonthOf(r.date)).filter(Boolean))];
+  const set = new Set();
+  for(const m of months){
+    let txs = [];
+    if(state.summary && state.summary.month === m && state.summary.transactions){
+      txs = state.summary.transactions;
+    }else{
+      try{
+        const r = await fetch(API + "/summary?month=" + m + "&t=" + Date.now());
+        const d = await r.json();
+        txs = d.ok ? (d.transactions||[]) : [];
+      }catch(e){ txs = []; }
+    }
+    for(const t of txs) set.add(dupKey(t.date, t.amount, t.memo || t.category));
+  }
+  return set;
+}
+
+// ファイルを base64 に変換（data URL の先頭を外す）
+function fileToBase64(file){
+  return new Promise((res, rej)=>{
+    const r = new FileReader();
+    r.onload = ()=>{ const s = String(r.result); res({ media_type:file.type || "image/jpeg", data: s.slice(s.indexOf(",")+1) }); };
+    r.onerror = ()=> rej(new Error("ファイル読込に失敗"));
+    r.readAsDataURL(file);
+  });
+}
+
+// 全カテゴリの <option>（種類でグループ化）
+function allCategoryOptionsHTML(selected){
+  const cats = state.options.categories || [];
+  const groups = {};
+  cats.forEach(c=>{ const k=(c.kind||"その他").replace(/\s/g,""); (groups[k]=groups[k]||[]).push(c.name); });
+  let html = '<option value="">（未分類）</option>';
+  Object.keys(groups).forEach(k=>{
+    html += '<optgroup label="'+k+'">' + groups[k].map(n=>
+      '<option'+(n===selected?' selected':'')+'>'+n+'</option>').join("") + '</optgroup>';
+  });
+  return html;
+}
+function kindOfCat(name){
+  const c = (state.options.categories||[]).find(x=>x.name===name);
+  return c ? c.kind : "";
+}
+
+// スキャン開始（ファイル選択 → 解析）
+async function startScan(files){
+  if(!files || !files.length) return;
+  $("reviewOverlay").style.display = "flex";
+  $("reviewHead").textContent = "";
+  $("bulkAccWrap").style.display = "none";
+  $("reviewList").innerHTML = '<div class="scanload"><span class="spin"></span>画像を解析中…（数秒〜十数秒）</div>';
+  $("reviewSubmit").disabled = true;
+  bindReviewClose();
+  try{
+    const encoded = [];
+    for(const f of files) encoded.push(await fileToBase64(f));
+    const r = await fetch(API + "/parse", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ files: encoded, today: new Date().toISOString().slice(0,10) })
+    });
+    const d = await r.json();
+    if(!d.ok) throw new Error(d.error || "parse error");
+    const rows = (d.transactions || []).map(t=>({
+      date: (t.date||"").slice(0,10),
+      amount: Math.abs(Math.round(Number(t.amount)||0)),
+      name: t.name || "",
+      category: t.category || "",
+      kind: t.kind || kindOfCat(t.category||""),
+      account: "",
+    }));
+    if(!rows.length){ $("reviewList").innerHTML = '<div class="empty">取引を読み取れませんでした</div>'; return; }
+
+    // 重複判定（既存取引 + バッチ内の重複）
+    const exist = await existingKeySet(rows);
+    const seen = new Set();
+    rows.forEach(row=>{
+      const key = dupKey(row.date, row.amount, row.name);
+      const isDup = exist.has(key) || seen.has(key);
+      seen.add(key);
+      row._dup = isDup;
+      row._on = !isDup;   // 重複は既定でオフ
+    });
+    scanRows = rows;
+    renderReview();
+  }catch(e){
+    $("reviewList").innerHTML = '<div class="empty">読み込みに失敗しました<br>'+e.message+'</div>';
+    toast("読み込み失敗: " + e.message, true);
+  }
+}
+
+function renderReview(){
+  const accHTML = accountOptionsHTML();
+  $("bulkAccWrap").style.display = "block";
+  $("bulkAcc").innerHTML = accHTML;
+  const dupN = scanRows.filter(r=>r._dup).length;
+  $("reviewHead").innerHTML = scanRows.length + ' 件を検出'
+    + (dupN ? '（うち <b style="color:var(--over)">'+dupN+'件は重複</b>のためオフ）' : '')
+    + '<br>内容を確認・修正してから追加してください。';
+
+  $("reviewList").innerHTML = scanRows.map((r,i)=>
+    '<div class="rrow '+(r._on?'':'off')+(r._dup?' dup':'')+'" data-i="'+i+'">'
+    + '<div class="rtop">'
+    +   '<input type="checkbox" class="rchk" '+(r._on?'checked':'')+' data-i="'+i+'">'
+    +   '<input class="rname" value="'+(r.name||"").replace(/"/g,"&quot;")+'" data-i="'+i+'" placeholder="名前・摘要">'
+    +   (r._dup?'<span class="badge dup">重複</span>':'')
+    + '</div>'
+    + '<div class="rgrid">'
+    +   '<input type="date" class="rdate" value="'+r.date+'" data-i="'+i+'">'
+    +   '<input type="number" inputmode="numeric" class="ramount" value="'+r.amount+'" data-i="'+i+'">'
+    +   '<select class="rcat" data-i="'+i+'">'+allCategoryOptionsHTML(r.category)+'</select>'
+    +   '<select class="racc" data-i="'+i+'">'+accHTML+'</select>'
+    + '</div></div>'
+  ).join("");
+
+  // 口座の初期値を反映
+  $("reviewList").querySelectorAll(".racc").forEach(sel=>{
+    selectAccountValue(sel, scanRows[sel.dataset.i].account);
+  });
+
+  // 編集イベント
+  const L = $("reviewList");
+  L.querySelectorAll(".rchk").forEach(el=> el.onchange = ()=>{
+    const r = scanRows[el.dataset.i]; r._on = el.checked;
+    el.closest(".rrow").classList.toggle("off", !el.checked);
+  });
+  L.querySelectorAll(".rname").forEach(el=> el.oninput = ()=>{ scanRows[el.dataset.i].name = el.value; });
+  L.querySelectorAll(".rdate").forEach(el=> el.onchange = ()=>{ scanRows[el.dataset.i].date = el.value; });
+  L.querySelectorAll(".ramount").forEach(el=> el.oninput = ()=>{ scanRows[el.dataset.i].amount = Math.abs(parseInt(el.value,10)||0); });
+  L.querySelectorAll(".rcat").forEach(el=> el.onchange = ()=>{
+    const r = scanRows[el.dataset.i]; r.category = el.value; r.kind = kindOfCat(el.value);
+  });
+  L.querySelectorAll(".racc").forEach(el=> el.onchange = ()=>{ scanRows[el.dataset.i].account = el.value; });
+
+  $("bulkAcc").onchange = ()=>{
+    const v = $("bulkAcc").value;
+    scanRows.forEach(r=> r.account = v);
+    $("reviewList").querySelectorAll(".racc").forEach(sel=> selectAccountValue(sel, v));
+  };
+
+  $("reviewSubmit").disabled = false;
+  $("reviewSubmit").textContent = "選択した取引を追加";
+}
+
+// 選択された行を1件ずつ /add へ
+async function submitScan(){
+  const targets = scanRows.filter(r=>r._on);
+  if(!targets.length){ toast("追加する取引が選ばれていません", true); return; }
+  for(const r of targets){
+    if(!r.amount || r.amount<=0){ toast("金額が未入力の行があります", true); return; }
+    if(!r.date){ toast("日付が未入力の行があります", true); return; }
+    if(!r.category){ toast("カテゴリ未選択の行があります", true); return; }
+  }
+  const btn = $("reviewSubmit");
+  btn.disabled = true;
+  let ok = 0, ng = 0;
+  for(let i=0;i<targets.length;i++){
+    const r = targets[i];
+    btn.textContent = "追加中… ("+(i+1)+"/"+targets.length+")";
+    try{
+      const body = { date:r.date, amount:r.amount, category:r.category, memo:r.name };
+      if(r.account) body.account = r.account;
+      const resp = await fetch(API + "/add", {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify(body)
+      });
+      const d = await resp.json();
+      if(!d.ok) throw new Error(d.error||"error");
+      ok++;
+    }catch(e){ ng++; }
+  }
+  $("reviewOverlay").style.display = "none";
+  scanRows = [];
+  toast(ng ? (ok+"件追加・"+ng+"件失敗") : (ok+"件を追加しました"), ng>0);
+  await loadSummary();
+}
+
+function bindReviewClose(){ $("reviewClose").onclick = closeReview; }
+function closeReview(){ scanRows = []; $("reviewOverlay").style.display = "none"; }
+
+// ---- スキャンのイベント ----
+$("scanFab").onclick = ()=> $("scanInput").click();
+$("scanInput").onchange = (e)=>{ startScan(e.target.files); e.target.value = ""; };
+$("reviewClose").onclick = closeReview;
+$("reviewOverlay").onclick = closeReview;
+$("reviewSubmit").onclick = submitScan;
 
 // ---- 起動 ----
 (async()=>{ checkPayday(); await loadOptions(); await loadSummary(); })();
