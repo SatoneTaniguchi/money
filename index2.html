@@ -341,7 +341,7 @@
   <div class="ilog-modal">
     <h3 id="ilogModalTitle">取込記録を追加</h3>
     <div class="fld"><label class="fld">口座 / サービス名</label>
-      <input type="text" id="ilogSource" placeholder="例: PayPay、楽天銀行、イオンカード">
+      <select id="ilogSource"></select>
     </div>
     <div class="ilog-date-row">
       <div><label class="fld">開始日</label>
@@ -1324,57 +1324,94 @@ $("reviewSubmit").onclick = submitScan;
 let ilogEditId = null;
 let ilogFilter = { source: '', dateFrom: '', dateTo: '' };
 
-function getIlogEntries(){
-  try{ return JSON.parse(localStorage.getItem('moneylog_importlog')||'[]'); }
-  catch(e){ return []; }
-}
-function saveIlogEntries(arr){
-  localStorage.setItem('moneylog_importlog', JSON.stringify(arr));
+// ── 取込記録は Notion（DB_IMPORTLOG）に保存。メモリにキャッシュして表示 ──
+let ilogCache = null;       // null = 未ロード
+let ilogLoadError = '';
+let lastScanFileCount = 0;  // 直近スキャンのファイル数（メモ用）
+
+function getIlogEntries(){ return ilogCache || []; }
+
+async function loadIlog(force){
+  if(ilogCache && !force) return ilogCache;
+  await migrateIlogOnce();
+  try{
+    const r = await fetch(API + "/importlog?t=" + Date.now());
+    const d = await r.json();
+    if(!d.ok) throw new Error(d.error||'error');
+    ilogCache = d.entries || [];
+    ilogLoadError = '';
+  }catch(e){
+    ilogCache = ilogCache || [];
+    ilogLoadError = e.message || String(e);
+  }
+  return ilogCache;
 }
 
-// AI解析完了時に仮エントリを自動追加（口座はsubmit時確定）
+// 旧localStorageの記録を一度だけNotionへ移行（非破壊・フラグでガード）
+async function migrateIlogOnce(){
+  if(localStorage.getItem('moneylog_ilog_migrated')) return;
+  let old = [];
+  try{ old = JSON.parse(localStorage.getItem('moneylog_importlog')||'[]'); }catch(e){ old = []; }
+  if(!old.length){ localStorage.setItem('moneylog_ilog_migrated','1'); return; }
+  let okCount = 0;
+  for(const e of old){
+    try{
+      const r = await fetch(API + "/importlog/add", {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({
+          source: e.source || '（口座未選択）',
+          from: e.from || '', to: e.to || '',
+          memo: e.memo || '', savedAt: e.savedAt || '',
+          txSnapshot: e.txSnapshot || []
+        })
+      });
+      const d = await r.json();
+      if(d.ok) okCount++;
+    }catch(_){}
+  }
+  // 1件でも成功したら移行済みに（DB_IMPORTLOG未設定で全滅した場合は次回再試行）
+  if(okCount > 0) localStorage.setItem('moneylog_ilog_migrated','1');
+}
+
+// スキャン時はファイル数だけ覚えておく（記録は取込確定時にNotionへ作成）
 function autoAddIlogFromScan(rows, files){
-  const dates = (rows||[]).map(r=>r.date).filter(Boolean).sort();
-  const today = new Date().toISOString().slice(0,10);
-  const fileCount = (files && files.length) ? files.length + 'ファイル読込' : '';
-  const noTx = (!rows || !rows.length);
-  const entry = {
-    id: 'scan_' + Date.now(),
-    source: '',
-    from: dates[0] || today,
-    to: dates[dates.length-1] || today,
-    memo: [fileCount, noTx ? '取引データなし' : ''].filter(Boolean).join(' / '),
-    savedAt: new Date().toISOString(),
-    _pending: !noTx,
-    // 解析した取引データをスナップショットとして保存
-    txSnapshot: (rows||[]).map(r=>({
-      date: r.date, name: r.name, amount: r.amount, category: r.category
-    }))
-  };
-  const entries = getIlogEntries();
-  entries.push(entry);
-  saveIlogEntries(entries);
+  lastScanFileCount = (files && files.length) ? files.length : 0;
 }
 
-// submitScan完了後、仮エントリに口座名を付けて確定
-function finalizeIlogFromScan(targets){
+// submitScan完了後、実際に取り込んだ取引でNotionに記録を作成
+async function finalizeIlogFromScan(targets){
   if(!targets || !targets.length) return;
   const accounts = [...new Set(targets.map(r=>r.account).filter(Boolean))];
   const source = accounts.length ? accounts.join('・') : '（口座未選択）';
-  const entries = getIlogEntries();
-  for(let i = entries.length-1; i >= 0; i--){
-    if(entries[i]._pending){
-      entries[i].source = source;
-      delete entries[i]._pending;
-      break;
-    }
-  }
-  saveIlogEntries(entries);
+  const ds = targets.map(r=>r.date).filter(Boolean).sort();
+  const entry = {
+    source,
+    from: ds[0] || '',
+    to: ds[ds.length-1] || '',
+    memo: lastScanFileCount ? (lastScanFileCount + 'ファイル読込') : '',
+    savedAt: new Date().toISOString(),
+    txSnapshot: targets.map(r=>({ date:r.date, name:r.name, amount:r.amount, category:r.category }))
+  };
+  try{
+    const r = await fetch(API + "/importlog/add", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify(entry)
+    });
+    const d = await r.json();
+    if(!d.ok) throw new Error(d.error||'error');
+  }catch(e){ toast("取込記録の保存に失敗: " + e.message, true); }
+  await loadIlog(true);
   if(state.tab === 'importlog') renderImportLog();
 }
 
-function renderImportLog(){
+
+
+async function renderImportLog(){
   const c = $('content');
+  if(ilogCache === null){
+    c.innerHTML = '<div class="ilog-wrap"><div class="ilog-empty">読み込み中…</div></div>';
+    await loadIlog();
+  }
   const allEntries = getIlogEntries().slice().reverse();
 
   const filtered = allEntries.filter(e => {
@@ -1387,6 +1424,7 @@ function renderImportLog(){
   const filterActive = ilogFilter.source || ilogFilter.dateFrom || ilogFilter.dateTo;
   let html = '<div class="ilog-wrap">';
   html += '<button class="ilog-add-btn" onclick="openIlogModal()">＋ 取込記録を手動追加</button>';
+  if(ilogLoadError) html += '<div class="ilog-empty" style="color:var(--over)">Notionから読み込めませんでした：'+ilogLoadError+'</div>';
 
   html += `<div class="ilog-filter-bar">
     <div class="ilog-filter-row">
@@ -1472,19 +1510,38 @@ function ilogToggleTx(listId, btn){
     + el.querySelectorAll('.ilog-tx-row').length + '件を' + (open ? '閉じる' : '見る');
 }
 
+// 取込記録モーダルの「口座/サービス名」セレクトを口座一覧で生成
+function fillIlogSourceSelect(currentVal){
+  const sel = $('ilogSource');
+  sel.innerHTML = accountOptionsHTML();
+  const v = currentVal || '';
+  if(v){
+    // 口座一覧に無い値（複数口座の結合・「（口座未選択）」・旧手入力など）は先頭に足して保持
+    const has = Array.from(sel.options).some(o=>o.value===v);
+    if(!has){
+      const opt = document.createElement('option');
+      opt.value = v; opt.textContent = v;
+      sel.insertBefore(opt, sel.firstChild);
+    }
+    sel.value = v;
+  }else{
+    sel.value = '';
+  }
+}
+
 function openIlogModal(id){
   ilogEditId = id || null;
   $('ilogModalTitle').textContent = id ? '取込記録を編集' : '取込記録を追加';
   if(id){
     const e = getIlogEntries().find(x=>x.id===id);
     if(e){
-      $('ilogSource').value = e.source || '';
+      fillIlogSourceSelect(e.source);
       $('ilogFrom').value = e.from || '';
       $('ilogTo').value = e.to || '';
       $('ilogMemo').value = e.memo || '';
     }
   } else {
-    $('ilogSource').value=''; $('ilogFrom').value=''; $('ilogTo').value=''; $('ilogMemo').value='';
+    fillIlogSourceSelect(''); $('ilogFrom').value=''; $('ilogTo').value=''; $('ilogMemo').value='';
   }
   $('ilogOverlay').classList.add('open');
   setTimeout(()=>$('ilogSource').focus(), 100);
@@ -1494,31 +1551,52 @@ function closeIlogModal(){
   $('ilogOverlay').classList.remove('open');
 }
 
-function saveIlogEntry(){
+async function saveIlogEntry(){
   const source = $('ilogSource').value.trim();
   if(!source){ $('ilogSource').focus(); return; }
-  const entry = {
-    id: ilogEditId || Date.now().toString(),
+  const body = {
     source,
     from: $('ilogFrom').value,
     to: $('ilogTo').value,
     memo: $('ilogMemo').value.trim(),
     savedAt: new Date().toISOString()
   };
-  let entries = getIlogEntries();
-  if(ilogEditId){ entries = entries.map(e => e.id===ilogEditId ? entry : e); }
-  else { entries.push(entry); }
-  saveIlogEntries(entries);
+  const editing = !!ilogEditId;
+  if(editing){
+    body.id = ilogEditId;
+    // 明細・件数は手動編集の対象外。既存スナップショットを維持して上書き消失を防ぐ
+    const cur = getIlogEntries().find(e=>e.id===ilogEditId);
+    body.txSnapshot = cur ? cur.txSnapshot : [];
+  }else{
+    body.txSnapshot = [];
+  }
+  try{
+    const r = await fetch(API + (editing ? "/importlog/update" : "/importlog/add"), {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify(body)
+    });
+    const d = await r.json();
+    if(!d.ok) throw new Error(d.error||'error');
+  }catch(e){ toast("保存に失敗: " + e.message, true); return; }
   closeIlogModal();
+  await loadIlog(true);
   if(state.tab === 'importlog') renderImportLog();
-  toast(ilogEditId ? '記録を更新しました' : '記録を追加しました');
+  toast(editing ? '記録を更新しました' : '記録を追加しました');
 }
 
 function editIlogEntry(id){ openIlogModal(id); }
 
-function deleteIlogEntry(id){
+async function deleteIlogEntry(id){
   if(!confirm('この記録を削除しますか？')) return;
-  saveIlogEntries(getIlogEntries().filter(e=>e.id!==id));
+  try{
+    const r = await fetch(API + "/importlog/delete", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ id })
+    });
+    const d = await r.json();
+    if(!d.ok) throw new Error(d.error||'error');
+  }catch(e){ toast("削除に失敗: " + e.message, true); return; }
+  await loadIlog(true);
   renderImportLog();
   toast('削除しました');
 }
