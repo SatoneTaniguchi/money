@@ -135,6 +135,8 @@
   .rrow{background:var(--card);border-radius:14px;padding:12px;margin-bottom:10px;position:relative}
   .rrow.off{opacity:.45}
   .rrow.dup{box-shadow:0 0 0 1.5px var(--over) inset}
+  .rrow.needcat{box-shadow:0 0 0 2px var(--over) inset;background:#faece7}
+  .rrow.needcat .rcat{border:2px solid var(--over);border-radius:8px}
   .rrow .rtop{display:flex;align-items:center;gap:8px;margin-bottom:8px}
   .rrow .rchk{width:20px;height:20px;flex-shrink:0;accent-color:var(--navy)}
   .rrow .rname{flex:1;min-width:0;font-size:14px;font-weight:700;padding:6px 8px;border-radius:8px}
@@ -1093,11 +1095,17 @@ function normKey(s){
 function dupKey(date, amount, name){
   return (date||"").slice(0,10) + "|" + Math.abs(Math.round(Number(amount)||0)) + "|" + normKey(name);
 }
+// 店名を見ない「日付|金額」キー（楽天ペイ⇔楽天カード/銀行の重複検出用）
+function daKey(date, amount){
+  return (date||"").slice(0,10) + "|" + Math.abs(Math.round(Number(amount)||0));
+}
+let scanExist = { full:new Set(), rakutenDA:new Set() };
 
 // 既存取引のキー集合を、対象の会計月ぶんだけ集める
 async function existingKeySet(rows){
   const months = [...new Set(rows.map(r=>fiscalMonthOf(r.date)).filter(Boolean))];
-  const set = new Set();
+  const full = new Set();
+  const rakutenDA = new Set();
   for(const m of months){
     let txs = [];
     if(state.summary && state.summary.month === m && state.summary.transactions){
@@ -1109,9 +1117,13 @@ async function existingKeySet(rows){
         txs = d.ok ? (d.transactions||[]) : [];
       }catch(e){ txs = []; }
     }
-    for(const t of txs) set.add(dupKey(t.date, t.amount, t.memo || t.category));
+    for(const t of txs){
+      full.add(dupKey(t.date, t.amount, t.memo || t.category));
+      // 楽天系口座の既存取引は「日付|金額」でも引けるようにする
+      if((t.account||"").includes("楽天")) rakutenDA.add(daKey(t.date, t.amount));
+    }
   }
-  return set;
+  return { full, rakutenDA };
 }
 
 // ファイルを base64 に変換（data URL の先頭を外す）
@@ -1140,6 +1152,64 @@ function allCategoryOptionsHTML(selected){
 function kindOfCat(name){
   const c = (state.options.categories||[]).find(x=>x.name===name);
   return c ? c.kind : "";
+}
+
+// 全カテゴリの <option>（追加画面と同じグループ分けで表示。取込レビュー用）
+function allGroupedCategoryOptionsHTML(selected){
+  const cats = state.options.categories || [];
+  const catSet = new Set(cats.map(c=>c.name));
+  let html = '<option value=""'+(selected?'':' selected')+'>（未分類）</option>';
+  const grouped = new Set(CAT_GROUPS_DEF.flatMap(g=>g.cats));
+  CAT_GROUPS_DEF.forEach(group=>{
+    const available = group.cats.filter(c=>catSet.has(c));
+    if(!available.length) return;
+    html += '<optgroup label="── '+group.label+' ──">';
+    available.forEach(name=>{
+      html += '<option'+(name===selected?' selected':'')+'>'+name+'</option>';
+    });
+    html += '</optgroup>';
+  });
+  const others = sortCats(cats.filter(c=>!grouped.has(c.name)));
+  if(others.length){
+    html += '<optgroup label="── その他 ──">';
+    others.forEach(c=>{
+      html += '<option'+(c.name===selected?' selected':'')+'>'+c.name+'</option>';
+    });
+    html += '</optgroup>';
+  }
+  return html;
+}
+
+// 口座選択後に楽天の「日付|金額」重複を再判定して反映
+function applyRakutenDedup(){
+  const seen = new Set();
+  scanRows.forEach(r=>{
+    const fk = dupKey(r.date, r.amount, r.name);
+    let dup = scanExist.full.has(fk) || seen.has(fk);
+    seen.add(fk);
+    if(!dup && (r.account||"").includes("楽天") && scanExist.rakutenDA.has(daKey(r.date, r.amount))){
+      dup = true;   // 出金元が楽天で、既存の楽天取引と同じ日付・金額 → 重複
+    }
+    r._dup = dup;
+    r._on = !dup;
+  });
+  // 画面に反映（再描画せず該当箇所だけ更新）
+  scanRows.forEach((r,i)=>{
+    const row = $("reviewList").querySelector('.rrow[data-i="'+i+'"]');
+    if(!row) return;
+    row.classList.toggle("dup", !!r._dup);
+    row.classList.toggle("off", !r._on);
+    const chk = row.querySelector(".rchk"); if(chk) chk.checked = r._on;
+    let badge = row.querySelector(".badge.dup");
+    if(r._dup && !badge){
+      const b = document.createElement("span"); b.className = "badge dup"; b.textContent = "重複";
+      row.querySelector(".rtop").appendChild(b);
+    }else if(!r._dup && badge){ badge.remove(); }
+  });
+  const dupN = scanRows.filter(r=>r._dup).length;
+  $("reviewHead").innerHTML = scanRows.length + ' 件を検出'
+    + (dupN ? '（うち <b style="color:var(--over)">'+dupN+'件は重複</b>のためオフ）' : '')
+    + '<br>内容を確認・修正してから追加してください。';
 }
 
 // スキャン開始（ファイル選択 → 解析）
@@ -1191,10 +1261,11 @@ async function startScan(files){
 
     // 重複判定（既存取引 + バッチ内の重複）
     const exist = await existingKeySet(rows);
+    scanExist = exist;
     const seen = new Set();
     rows.forEach(row=>{
       const key = dupKey(row.date, row.amount, row.name);
-      const isDup = exist.has(key) || seen.has(key);
+      const isDup = exist.full.has(key) || seen.has(key);
       seen.add(key);
       row._dup = isDup;
       row._on = !isDup;   // 重複は既定でオフ
@@ -1230,7 +1301,7 @@ function renderReview(){
     + '<div class="rgrid">'
     +   '<input type="date" class="rdate" value="'+r.date+'" data-i="'+i+'">'
     +   '<input type="number" inputmode="numeric" class="ramount" value="'+r.amount+'" data-i="'+i+'">'
-    +   '<select class="rcat" data-i="'+i+'">'+allCategoryOptionsHTML(r.category)+'</select>'
+    +   '<select class="rcat" data-i="'+i+'">'+allGroupedCategoryOptionsHTML(r.category)+'</select>'
     +   '<select class="rsub" data-i="'+i+'">'+subOptionsHTML(r.category, r.subcategory)+'</select>'
     +   '<select class="racc full" data-i="'+i+'">'+accHTML+'</select>'
     + '</div></div>'
@@ -1260,14 +1331,16 @@ function renderReview(){
     const sub = L.querySelector('.rsub[data-i="'+i+'"]');
     sub.innerHTML = subOptionsHTML(r.category, "");
     sub.style.display = subListOf(r.category).length ? "" : "none";
+    el.closest(".rrow").classList.toggle("needcat", !el.value);
   });
   L.querySelectorAll(".rsub").forEach(el=> el.onchange = ()=>{ scanRows[el.dataset.i].subcategory = el.value; });
-  L.querySelectorAll(".racc").forEach(el=> el.onchange = ()=>{ scanRows[el.dataset.i].account = el.value; });
+  L.querySelectorAll(".racc").forEach(el=> el.onchange = ()=>{ scanRows[el.dataset.i].account = el.value; applyRakutenDedup(); });
 
   $("bulkAcc").onchange = ()=>{
     const v = $("bulkAcc").value;
     scanRows.forEach(r=> r.account = v);
     $("reviewList").querySelectorAll(".racc").forEach(sel=> selectAccountValue(sel, v));
+    applyRakutenDedup();
   };
 
   $("reviewSubmit").disabled = false;
@@ -1278,14 +1351,39 @@ function renderReview(){
 async function submitScan(){
   const targets = scanRows.filter(r=>r._on);
   if(!targets.length){ toast("追加する取引が選ばれていません", true); return; }
+
+  // 未入力ハイライトをリセット
+  $("reviewList").querySelectorAll(".rrow").forEach(el=>el.classList.remove("needcat"));
+  const scrollToRow = (r)=>{
+    const idx = scanRows.indexOf(r);
+    const row = $("reviewList").querySelector('.rrow[data-i="'+idx+'"]');
+    if(row){ row.classList.add("needcat"); row.scrollIntoView({behavior:"smooth", block:"center"}); }
+  };
+  // 金額・日付
   for(const r of targets){
-    if(!r.amount || r.amount<=0){ toast("金額が未入力の行があります", true); return; }
-    if(!r.date){ toast("日付が未入力の行があります", true); return; }
-    if(!r.category){ toast("カテゴリ未選択の行があります", true); return; }
+    if(!r.amount || r.amount<=0){ scrollToRow(r); toast("金額が未入力の行があります", true); return; }
+    if(!r.date){ scrollToRow(r); toast("日付が未入力の行があります", true); return; }
   }
+  // カテゴリ未選択（該当行を全てハイライトし、先頭へスクロール）
+  const missCat = targets.filter(r=>!r.category);
+  if(missCat.length){
+    missCat.forEach(r=>{
+      const idx = scanRows.indexOf(r);
+      const row = $("reviewList").querySelector('.rrow[data-i="'+idx+'"]');
+      if(row) row.classList.add("needcat");
+    });
+    const idx0 = scanRows.indexOf(missCat[0]);
+    const first = $("reviewList").querySelector('.rrow[data-i="'+idx0+'"]');
+    if(first) first.scrollIntoView({behavior:"smooth", block:"center"});
+    toast(missCat.length+"件、カテゴリ未選択です", true);
+    return;
+  }
+
   const btn = $("reviewSubmit");
   btn.disabled = true;
   let ok = 0, ng = 0;
+  const added = [];
+  const errs = [];
   for(let i=0;i<targets.length;i++){
     const r = targets[i];
     btn.textContent = "追加中… ("+(i+1)+"/"+targets.length+")";
@@ -1299,13 +1397,16 @@ async function submitScan(){
       });
       const d = await resp.json();
       if(!d.ok) throw new Error(d.error||"error");
-      ok++;
-    }catch(e){ ng++; }
+      ok++; added.push(r);
+    }catch(e){ ng++; errs.push(e.message||String(e)); }
   }
+  btn.disabled = false;
   $("reviewOverlay").style.display = "none";
-  finalizeIlogFromScan(targets);
+  const uniqErrs = [...new Set(errs)];
+  // 取込記録（成功分を明細に、失敗があれば理由をメモに残す）
+  await finalizeIlogFromScan(targets, added, { ng, errors: uniqErrs });
   scanRows = [];
-  toast(ng ? (ok+"件追加・"+ng+"件失敗") : (ok+"件を追加しました"), ng>0);
+  toast(ng ? (ok+"件追加・"+ng+"件失敗：" + (uniqErrs[0]||"不明なエラー")) : (ok+"件を追加しました"), ng>0);
   await loadSummary();
 }
 
@@ -1378,19 +1479,25 @@ function autoAddIlogFromScan(rows, files){
   lastScanFileCount = (files && files.length) ? files.length : 0;
 }
 
-// submitScan完了後、実際に取り込んだ取引でNotionに記録を作成
-async function finalizeIlogFromScan(targets){
-  if(!targets || !targets.length) return;
-  const accounts = [...new Set(targets.map(r=>r.account).filter(Boolean))];
+// submitScan完了後、取り込んだ取引でNotionに記録を作成（成功分を明細に、失敗理由はメモに）
+async function finalizeIlogFromScan(selected, added, result){
+  selected = selected || []; added = added || []; result = result || {};
+  const ngN = result.ng || 0;
+  const errs = result.errors || [];
+  if(!selected.length && !ngN) return;
+  const accounts = [...new Set(selected.map(r=>r.account).filter(Boolean))];
   const source = accounts.length ? accounts.join('・') : '（口座未選択）';
-  const ds = targets.map(r=>r.date).filter(Boolean).sort();
+  const ds = selected.map(r=>r.date).filter(Boolean).sort();
+  const memoParts = [];
+  if(lastScanFileCount) memoParts.push(lastScanFileCount + 'ファイル読込');
+  if(ngN) memoParts.push(ngN + '件失敗：' + (errs.length ? errs.join(' / ') : '不明なエラー'));
   const entry = {
     source,
     from: ds[0] || '',
     to: ds[ds.length-1] || '',
-    memo: lastScanFileCount ? (lastScanFileCount + 'ファイル読込') : '',
+    memo: memoParts.join(' / '),
     savedAt: new Date().toISOString(),
-    txSnapshot: targets.map(r=>({ date:r.date, name:r.name, amount:r.amount, category:r.category }))
+    txSnapshot: added.map(r=>({ date:r.date, name:r.name, amount:r.amount, category:r.category }))
   };
   try{
     const r = await fetch(API + "/importlog/add", {
